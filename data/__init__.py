@@ -76,14 +76,16 @@ class Dataset:
 
         # Insert data into arrays
         for sample in range(n_samples):
-            np_left[:, sample * past_samples:sample * past_samples + past_samples] = \
-                self.np_left[:, self.cnt_samples + sample: self.cnt_samples + sample + past_samples]
-            np_right[:, sample * past_samples:sample * past_samples + past_samples] = \
-                self.np_right[:, self.cnt_samples + sample: self.cnt_samples + sample + past_samples]
+            for past in range(past_samples):
+                sample_left = self.np_left[:, self.cnt_samples + sample + past_samples]
+                np_left[past * 88:past * 88 + 88, sample] = sample_left
+
+                sample_right = self.np_left[:, self.cnt_samples + sample + past_samples]
+                np_right[past * 88:past * 88 + 88, sample] = sample_right
 
         self.cnt_samples += n_samples
 
         hands_88 = np.maximum(np_left, np_right).T
-        hands_176 = np.concatenate([np_left, np_right]).T  # [:, past_samples - 1::past_samples].T
+        hands_176 = np.concatenate([np_left, np_right])[past_samples - 1::past_samples].T
 
         return hands_88, hands_176

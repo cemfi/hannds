@@ -8,7 +8,7 @@ try:
 except ImportError:
     _HAS_FLUIDSYNTH = False
 import os
-import pkg_resources
+# import pkg_resources
 
 from .containers import PitchBend
 from .utilities import pitch_bend_to_semitones, note_number_to_hz
@@ -410,7 +410,7 @@ class Instrument(object):
         """
         # If sf2_path is None, use the included TimGM6mb.sf2 path
         if sf2_path is None:
-            sf2_path = pkg_resources.resource_filename(__name__, DEFAULT_SF2)
+            sf2_path = DEFAULT_SF2
 
         if not _HAS_FLUIDSYNTH:
             raise ImportError("fluidsynth() was called but pyfluidsynth "

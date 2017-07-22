@@ -5,6 +5,10 @@ channels:
 
 dependencies:
   - python=3.5
+  - setuptools
   - numpy
   - numba
   - tensorflow
+  - pip
+  - pip:
+    - mido
