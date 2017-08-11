@@ -9,6 +9,8 @@ dependencies:
   - numpy
   - numba
   - tensorflow
+  - matplotlib
+  - pyqt
   - pip
   - pip:
     - mido
