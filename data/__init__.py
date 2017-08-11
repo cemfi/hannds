@@ -80,7 +80,7 @@ class Dataset:
                 sample_left = self.np_left[:, self.cnt_samples + sample + past_samples]
                 np_left[past * 88:past * 88 + 88, sample] = sample_left
 
-                sample_right = self.np_left[:, self.cnt_samples + sample + past_samples]
+                sample_right = self.np_right[:, self.cnt_samples + sample + past_samples]
                 np_right[past * 88:past * 88 + 88, sample] = sample_right
 
         self.cnt_samples += n_samples
