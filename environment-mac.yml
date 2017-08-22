@@ -1,0 +1,17 @@
+name: hannds
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.5
+  - setuptools
+  - pyqt
+  - numpy
+  - numba
+  - scipy
+  - matplotlib
+  - pip
+  - pip:
+    - mido
+    - https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-1.3.0-py2-none-any.whl
