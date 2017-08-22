@@ -30,11 +30,14 @@ errors = tf.cast(tf.not_equal(categories, y_), tf.float32)
 num_errors = tf.reduce_sum(errors)
 num_notes = tf.reduce_sum(tf.abs(y_))
 error_rate = num_errors / num_notes
+
 tf.summary.scalar('error rate', error_rate)
 
 
-sess = tf.InteractiveSession()
-tf.global_variables_initializer().run()
+sess = tf.Session()
+init = tf.global_variables_initializer()
+sess.run(init)
+
 
 writer = tf.summary.FileWriter("logs")
 
