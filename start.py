@@ -5,7 +5,7 @@ from data import Dataset
 
 import numpy as np
 
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 # Import data
 data = Dataset('./data')
@@ -14,41 +14,40 @@ PAST_SAMPLES = 1
 
 # Create the model
 x = tf.placeholder(tf.float32, [None, 88 * PAST_SAMPLES], name='input')
-W = tf.Variable(tf.zeros([88 * PAST_SAMPLES, 88 * 2]))
-b = tf.Variable(tf.zeros([88 * 2]))
-y = tf.matmul(x, W) + b
+W = tf.Variable(tf.zeros([88 * PAST_SAMPLES, 88]))
+b = tf.Variable(tf.zeros([88]))
+y = tf.tanh(tf.matmul(x, W) + b)
 
 # Define loss and optimizer
-y_ = tf.placeholder(tf.float32, [None, 88 * 2])
+y_ = tf.placeholder(tf.float32, [None, 88])
 loss = tf.reduce_mean(tf.squared_difference(y, y_))
 train_step = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
+
+#error rate calculation
+masked_prediction = tf.multiply(x, y)
+categories = tf.sign(masked_prediction)
+errors = tf.cast(tf.not_equal(categories, y_), tf.float32)
+num_errors = tf.reduce_sum(errors)
+num_notes = tf.reduce_sum(tf.abs(y_))
+error_rate = num_errors / num_notes
+tf.summary.scalar('error rate', error_rate)
+
 
 sess = tf.InteractiveSession()
 tf.global_variables_initializer().run()
 
+writer = tf.summary.FileWriter("logs")
+
+merged = tf.summary.merge_all()
+
+
 # Train
-TRAINING_STEPS = 1000
+TRAINING_STEPS = 100
 
 for i in range(TRAINING_STEPS):
     batch_xs, batch_ys = data.next_batch(1000, past_samples=PAST_SAMPLES)
-    sess.run(train_step, feed_dict={x: batch_xs, y_: batch_ys})
+    summ, _ = sess.run([merged, train_step], feed_dict={x: batch_xs, y_: batch_ys})
 
-    if i % 100 == 0:
-        print(sess.run(loss, feed_dict={x: batch_xs, y_: batch_ys}))
-        # Mask for relevant output
-        mask = tf.tile(x, [1, 2]) # Does not work for PAST_SAMPLES other than 1
-        masked_prediction = y * mask
-        left_hand, right_hand = tf.split(masked_prediction, 2, 1)
-        left_class = tf.cast(tf.greater(left_hand, right_hand), tf.float32)
-        right_class = tf.cast(tf.greater(right_hand, left_hand), tf.float32)
-        result = tf.concat([left_class, right_class], 1)
-        errors = tf.cast(tf.not_equal(y_, result), tf.float32)
-        num_errors = tf.reduce_sum(errors)
-        notes = tf.reduce_sum(y_)
-        error_rate = tf.divide(num_errors, notes) # Strange: error rate sometimes > 1
-        print("error_rate: ", sess.run(error_rate, feed_dict={x: batch_xs, y_: batch_ys}))
-        # print("y_: ", sess.run(y_, feed_dict={x: batch_xs, y_: batch_ys}))
-        # print("result: ", sess.run(result, feed_dict={x: batch_xs, y_: batch_ys}))
-        # print("left_hand: ", sess.run(left_hand, feed_dict={x: batch_xs, y_: batch_ys}))
-        # print("right_hand: ", sess.run(right_hand, feed_dict={x: batch_xs, y_: batch_ys}))
-        # print("masked_prediction: ", sess.run(masked_prediction, feed_dict={x: batch_xs, y_: batch_ys}))
+    writer.add_summary(summ, global_step=i)
+
+
