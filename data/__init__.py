@@ -40,14 +40,14 @@ class Dataset:
 
         # Fill arrays with data
         for note in midi_left.notes:
-            start = math.floor(note.start * self.window_ms)
-            end = math.ceil(note.end * self.window_ms)
+            start = int(math.floor(note.start * self.window_ms))
+            end = int(math.ceil(note.end * self.window_ms))
             for w in range(start, end):
                 np_left[note.pitch, w] = 1
 
         for note in midi_right.notes:
-            start = math.floor(note.start * self.window_ms)
-            end = math.ceil(note.end * self.window_ms)
+            start = int(math.floor(note.start * self.window_ms))
+            end = int(math.ceil(note.end * self.window_ms))
             for w in range(start, end):
                 np_right[note.pitch, w] = 1
 
@@ -86,6 +86,6 @@ class Dataset:
         self.cnt_samples += n_samples
 
         hands_88 = np.maximum(np_left, np_right).T
-        hands_176 = np.concatenate([np_left, np_right])[past_samples - 1::past_samples].T
+        hands_176 = (np_left - np_right)[past_samples - 1::past_samples].T
 
         return hands_88, hands_176
