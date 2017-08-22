@@ -43,13 +43,13 @@ class Dataset:
             start = int(math.floor(note.start * self.window_ms))
             end = int(math.ceil(note.end * self.window_ms))
             for w in range(start, end):
-                np_left[note.pitch, w] = 1
+                np_left[note.pitch - 21, w] = 1
 
         for note in midi_right.notes:
             start = int(math.floor(note.start * self.window_ms))
             end = int(math.ceil(note.end * self.window_ms))
             for w in range(start, end):
-                np_right[note.pitch, w] = 1
+                np_right[note.pitch - 21, w] = 1
 
         self.np_left = np_left
         self.np_right = np_right
