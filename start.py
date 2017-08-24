@@ -2,7 +2,9 @@ import logging
 import os
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import tensorflow as tf
+
 from data import Dataset
 
 import numpy as np
@@ -13,7 +15,7 @@ LOG_PATH = 'logs'
 
 
 def get_figure():
-    fig = plt.figure(num=0, figsize=(10, 50), dpi=72)
+    fig = plt.figure(num=0, figsize=(100, 9.61), dpi=72)
     fig.clf()
     return fig
 
@@ -59,7 +61,7 @@ error_rate = num_errors / num_notes
 tf.summary.scalar('error rate', error_rate)
 fig = get_figure()
 image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(fig).shape)
-image_summary = tf.summary.image('image', image_placeholder)
+image_summary = tf.summary.image('output', image_placeholder)
 
 with tf.Session() as sess:
     tf.global_variables_initializer().run()
@@ -73,9 +75,11 @@ with tf.Session() as sess:
         batch_xs, batch_ys = data.next_batch(1000, past_samples=PAST_SAMPLES)
         _, result = sess.run([train_step, masked_prediction], feed_dict={x: batch_xs, y_: batch_ys})
 
-        #plt.imshow(result, cmap='Greys')
-        #plt.show()
+        # plt.imshow(result, cmap='Greys')
+        # plt.show()
+
 
         fig = get_figure()
-        plt.imshow(result, cmap='Greys')
+        plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
+        plt.tight_layout()
         figure_to_summary(fig)
