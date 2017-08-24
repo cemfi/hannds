@@ -1,8 +1,4 @@
-import logging
-import os
-
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 import tensorflow as tf
 
 from data import Dataset
@@ -15,7 +11,7 @@ LOG_PATH = 'logs'
 
 
 def get_figure():
-    fig = plt.figure(num=0, figsize=(100, 9.61), dpi=72)
+    fig = plt.figure(num=0, figsize=(25, 2.7), dpi=72)
     fig.clf()
     return fig
 
@@ -30,7 +26,7 @@ def fig2rgb_array(fig, expand=True):
 
 def figure_to_summary(fig):
     image = fig2rgb_array(fig)
-    writer.add_summary(image_summary.eval(feed_dict={image_placeholder: image}))
+    return image_summary.eval(feed_dict={image_placeholder: image})
 
 
 # Import data
@@ -58,28 +54,28 @@ num_notes = tf.reduce_sum(tf.abs(y_))
 error_rate = num_errors / num_notes
 
 # Summary
-tf.summary.scalar('error rate', error_rate)
-fig = get_figure()
-image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(fig).shape)
+error_rate_summary = tf.summary.scalar('error rate', error_rate)
+image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
 image_summary = tf.summary.image('output', image_placeholder)
+
+writer = tf.summary.FileWriter(LOG_PATH)
 
 with tf.Session() as sess:
     tf.global_variables_initializer().run()
-
-    writer = tf.summary.FileWriter(LOG_PATH)
 
     # Train
     TRAINING_STEPS = 10000
 
     for i in range(TRAINING_STEPS):
         batch_xs, batch_ys = data.next_batch(1000, past_samples=PAST_SAMPLES)
-        _, result = sess.run([train_step, masked_prediction], feed_dict={x: batch_xs, y_: batch_ys})
+        error_rate_val, _, result = sess.run([error_rate_summary, train_step, masked_prediction],
+                                             feed_dict={x: batch_xs, y_: batch_ys})
 
-        # plt.imshow(result, cmap='Greys')
-        # plt.show()
-
-
+        # Write output as image to summary
         fig = get_figure()
-        plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
+        plt.imshow(result.T, cmap='seismic', origin='lower', vmin=-1, vmax=1)
         plt.tight_layout()
-        figure_to_summary(fig)
+        writer.add_summary(figure_to_summary(fig))
+
+        # Write other values to summary
+        writer.add_summary(error_rate_val)
