@@ -68,14 +68,17 @@ with tf.Session() as sess:
 
     for i in range(TRAINING_STEPS):
         batch_xs, batch_ys = data.next_batch(1000, past_samples=PAST_SAMPLES)
-        error_rate_val, _, result = sess.run([error_rate_summary, train_step, masked_prediction],
-                                             feed_dict={x: batch_xs, y_: batch_ys})
+        _, error_rate_val, result = sess.run([
+            train_step,
+            error_rate_summary,
+            masked_prediction
+        ], feed_dict={x: batch_xs, y_: batch_ys})
 
         # Write output as image to summary
         fig = get_figure()
         plt.imshow(result.T, cmap='seismic', origin='lower', vmin=-1, vmax=1)
         plt.tight_layout()
-        writer.add_summary(figure_to_summary(fig))
+        writer.add_summary(figure_to_summary(fig), i)
 
         # Write other values to summary
-        writer.add_summary(error_rate_val)
+        writer.add_summary(error_rate_val, i)
