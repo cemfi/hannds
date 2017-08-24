@@ -86,6 +86,6 @@ class Dataset:
         self.cnt_samples += n_samples
 
         hands_88 = np.maximum(np_left, np_right).T
-        hands_176 = (np_left - np_right)[past_samples - 1::past_samples].T
+        hands_176 = (np_right - np_left)[past_samples - 1::past_samples].T
 
         return hands_88, hands_176
