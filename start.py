@@ -1,5 +1,8 @@
+import os
+import sys
+
 import matplotlib
-matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import datetime
@@ -8,10 +11,12 @@ from data import Dataset
 
 import numpy as np
 
+if sys.platform == 'darwin':
+    matplotlib.use('Agg')
+
 # logging.basicConfig(level=logging.DEBUG)
 
-LOG_PATH = 'logs/'
-LOG_PATH = LOG_PATH + datetime.datetime.now().strftime('%H:%M')
+LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H:%M').replace(':', '-'))
 
 
 def get_figure():
@@ -44,7 +49,6 @@ W = tf.Variable(tf.zeros([88 * PAST_SAMPLES, 88]))
 b = tf.Variable(tf.zeros([88]))
 y = tf.sigmoid(tf.matmul(x, W) + b)
 
-
 # Define loss and optimizer
 y_ = tf.placeholder(tf.float32, [None, 88])
 truth = (y_ + 1.0) / 2.0
@@ -67,7 +71,6 @@ num_errors = tf.reduce_sum(errors)
 num_notes = tf.reduce_sum(tf.abs(y_))
 error_rate = num_errors / num_notes
 
-
 # Summary
 error_rate_summary = tf.summary.scalar('error rate', error_rate)
 image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
@@ -88,7 +91,6 @@ with tf.Session() as sess:
             masked_prediction,
             y
         ], feed_dict={x: batch_xs, y_: batch_ys})
-
 
         # Write output as image to summary
         fig = get_figure()
