@@ -86,7 +86,7 @@ with tf.Session() as sess:
     TRAINING_STEPS = 10000
 
     for i in range(TRAINING_STEPS):
-        batch_xs, batch_ys = data.next_batch(400, n_past_windows=50)
+        batch_xs, batch_ys = data.next_batch(400, n_past_entries=50)
         _, error_rate_val, result, any = sess.run([
             train_step,
             error_rate_summary,

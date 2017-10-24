@@ -12,8 +12,9 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 @jit
-def convert(path, ms_window=20, overwrite=False):
+def convert(path, ms_window=20, overwrite=True):
     if os.path.isfile(path):
+        # Load single midi file
         midi_files = [path]
     else:
         # Get list of all midi files in path
@@ -24,7 +25,7 @@ def convert(path, ms_window=20, overwrite=False):
         if len(midi_files) == 0:
             raise FileNotFoundError('No midi files found!')
 
-    windows_per_sec = (1000 / ms_window)
+    entries_per_sec = (1000 / ms_window)
     for midi_file in midi_files:
         npy_file = midi_file + '_' + str(ms_window) + 'ms' + '.npy'
 
@@ -34,14 +35,18 @@ def convert(path, ms_window=20, overwrite=False):
             midi_data = midi.instruments[0], midi.instruments[1]
 
             # Generate empty numpy arrays
-            array_dim = math.ceil(midi.get_end_time() * windows_per_sec)
-            hands = np.zeros((88, array_dim, 2), dtype=np.bool)
+            array_dim = math.ceil(midi.get_end_time() * entries_per_sec)
+            hands = np.zeros((
+                88,         # 88 keys on a piano
+                array_dim,  # Number of entries
+                2           # Left and right hand = 2 hands
+            ), dtype=np.bool)
 
             # Fill arrays with data
             for hand, midi_hand in enumerate(midi_data):
                 for note in midi_hand.notes:
-                    start = int(math.floor(note.start * windows_per_sec))
-                    end = int(math.ceil(note.end * windows_per_sec))
+                    start = int(math.floor(note.start * entries_per_sec))
+                    end = int(math.ceil(note.end * entries_per_sec))
                     for width in range(start, end):
                         hands[note.pitch - 21, width, hand] = True
 
@@ -51,34 +56,48 @@ def convert(path, ms_window=20, overwrite=False):
 class Dataset:
     def __init__(self, path):
         if os.path.isfile(path):
+            # Load single numpy file
             npy_files = [path]
         else:
+            # Get list of numpy files in path
             npy_files = []
             npy_files.extend(glob.glob(os.path.join(path, '*.npy')))
 
             if len(npy_files) == 0:
                 raise FileNotFoundError('No numpy arrays found!')
 
+        # Load numpy array data in a single long tensor
         self.data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1)
 
-    def next_batch(self, n_samples, n_past_windows=0):
-        hands = np.zeros((88, n_past_windows + 1, 2, n_samples), dtype=np.bool)
+    def next_batch(self, n_samples, n_past_entries=0):
+        # Initialize result tensor with zeros
+        hands = np.zeros((
+            88,                  # 88 keys on a piano
+            n_past_entries + 1,  # Number of entries per sample
+            2,                   # Left and right hand = 2 hands
+            n_samples            # Number of samples per batch
+        ), dtype=np.bool)
+
+        # Get total number of entries
+        n_entries_total = self.data.shape[1]
 
         for sample in range(n_samples):
-            window = random.randrange(self.data.shape[1] + n_past_windows)
+            # Pick a random left boundary for the extracted data
+            start = random.randrange(n_entries_total + n_past_entries)
 
-            if window >= self.data.shape[1]:
+            # Extract data and fill with zeros if necessary
+            if start >= n_entries_total:
                 data = np.concatenate([
-                    self.data[:, window - n_past_windows:, :],
-                    np.zeros((88, window - self.data.shape[1] + 1, 2), dtype=np.bool)
+                    self.data[:, start - n_past_entries:, :],
+                    np.zeros((88, start - n_entries_total + 1, 2), dtype=np.bool)
                 ], axis=1)
-            elif window < n_past_windows:
+            elif start < n_past_entries:
                 data = np.concatenate([
-                    np.zeros((88, n_past_windows - window, 2), dtype=np.bool),
-                    self.data[:, 0:window + 1, :]
+                    np.zeros((88, n_past_entries - start, 2), dtype=np.bool),
+                    self.data[:, 0:start + 1, :]
                 ], axis=1)
             else:
-                data = self.data[:, window - n_past_windows:window + 1, :]
+                data = self.data[:, start - n_past_entries:start + 1, :]
 
             hands[:, :, :, sample] = data
 
@@ -99,4 +118,4 @@ if __name__ == '__main__':
     convert(path='data', ms_window=20, overwrite=False)
     foo = Dataset('data')
     for i in range(100):
-        foo.next_batch(400, n_past_windows=100)
+        foo.next_batch(400, n_past_entries=100)
