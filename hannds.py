@@ -54,8 +54,8 @@ def convert(path, ms_window=20, overwrite=True):
 
 
 class Dataset:
-    def __init__(self, path, n_past_entries=0):
-        self.n_past_entries = n_past_entries
+    def __init__(self, path, n_past_samples=0):
+        self.n_past_samples = n_past_samples
 
         if os.path.isfile(path):
             # Load single numpy file
@@ -70,51 +70,53 @@ class Dataset:
 
         # Load numpy array data in a single long tensor and fill start and end with zeros
         self.data = np.concatenate([
-            np.zeros((88, n_past_entries, 2)),
+            np.zeros((88, n_past_samples, 2)),
             np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
-            np.zeros((88, n_past_entries, 2))
+            np.zeros((88, n_past_samples, 2))
         ], axis=1)
 
     def next_batch(self, n_samples):
         # Initialize result tensor with zeros
         hands = np.zeros((
             88,                       # 88 keys on a piano
-            self.n_past_entries + 1,  # Number of entries per sample
+            self.n_past_samples + 1,  # Number of past samples considered
             2,                        # Left and right hand = 2 hands
             n_samples                 # Number of samples per batch
         ), dtype=np.bool)
 
-        # Get total number of entries
-        n_entries_total = self.data.shape[1] - self.n_past_entries
+        # Get total number of samples
+        n_samples_total = self.data.shape[1] - self.n_past_samples
 
         for sample in range(n_samples):
-            # Pick a random starting point in the dataset...
-            start = random.randrange(n_entries_total)
-            # ... and extract (n_past_entries + 1) samples
-            hands[:, :, :, sample] = self.data[:, start:start+self.n_past_entries+1, :]
+            # Pick random starting point in dataset...
+            start = random.randrange(n_samples_total)
+            # ...and extract samples
+            hands[:, :, :, sample] = self.data[:, start:start+self.n_past_samples + 1, :]
 
         # Merge both hands in a single tensor
         batch_x = np.logical_or(
             hands[:, :, 0, :],
             hands[:, :, 1, :]
-        ).astype(np.int8)
+        )
+
         # Subtract left from right hand, so that
-        # -1 => left hand
-        # +1 => right hand
-        #  0 => not played (or both hands!)
-        #
-        # Only last 'column' is returned since it is the only one of relevance for the output
-        batch_y = hands[:, :, 0, -1].astype(np.int8) -\
-                  hands[:, :, 1, -1].astype(np.int8)
+        #   -1 => left hand
+        #   +1 => right hand
+        #    0 => not played (or both hands!)
+        # Only last played sample of batch is returned since
+        # it is the only one of relevance for the output
+        batch_y = hands[:, -1, 0, :].astype(np.int8) -\
+                  hands[:, -1, 1, :].astype(np.int8)
 
         return batch_x, batch_y
 
 
 if __name__ == '__main__':
     convert(path='data', ms_window=20, overwrite=False)
-    foo = Dataset('data', n_past_entries=100)
+    foo = Dataset('data', n_past_samples=100)
     for i in range(10000):
         batch_x, batch_y = foo.next_batch(400)
+
 
         # import matplotlib.pyplot as plt
         # tmp = batch_y[:, :, 0]
