@@ -68,7 +68,7 @@ class Dataset:
             if len(npy_files) == 0:
                 raise FileNotFoundError('No numpy arrays found!')
 
-        # Load numpy array data in a single long tensor and fill start and end with zeros
+        # Load numpy array data in a single long array and fill start and end with zeros
         self.data = np.concatenate([
             np.zeros((88, n_past_samples, 2)),
             np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
@@ -76,7 +76,7 @@ class Dataset:
         ], axis=1)
 
     def next_batch(self, n_samples):
-        # Initialize result tensor with zeros
+        # Initialize result array with zeros
         hands = np.zeros((
             88,                       # 88 keys on a piano
             self.n_past_samples + 1,  # Number of past samples considered
@@ -93,7 +93,7 @@ class Dataset:
             # ...and extract samples
             hands[:, :, :, sample] = self.data[:, start:start+self.n_past_samples + 1, :]
 
-        # Merge both hands in a single tensor
+        # Merge both hands in a single array
         batch_x = np.logical_or(
             hands[:, :, 0, :],
             hands[:, :, 1, :]
