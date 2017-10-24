@@ -25,7 +25,7 @@ def convert(path, ms_window=20, overwrite=True):
         if len(midi_files) == 0:
             raise FileNotFoundError('No midi files found!')
 
-    entries_per_sec = (1000 / ms_window)
+    samples_per_sec = (1000 / ms_window)
     for midi_file in midi_files:
         npy_file = midi_file + '_' + str(ms_window) + 'ms' + '.npy'
 
@@ -35,18 +35,18 @@ def convert(path, ms_window=20, overwrite=True):
             midi_data = midi.instruments[0], midi.instruments[1]
 
             # Generate empty numpy arrays
-            array_dim = math.ceil(midi.get_end_time() * entries_per_sec)
+            n_samples = math.ceil(midi.get_end_time() * samples_per_sec)
             hands = np.zeros((
                 88,         # 88 keys on a piano
-                array_dim,  # Number of entries
+                n_samples,  # Number of samples
                 2           # Left and right hand = 2 hands
             ), dtype=np.bool)
 
             # Fill arrays with data
             for hand, midi_hand in enumerate(midi_data):
                 for note in midi_hand.notes:
-                    start = int(math.floor(note.start * entries_per_sec))
-                    end = int(math.ceil(note.end * entries_per_sec))
+                    start = int(math.floor(note.start * samples_per_sec))
+                    end = int(math.ceil(note.end * samples_per_sec))
                     for width in range(start, end):
                         hands[note.pitch - 21, width, hand] = True
 
@@ -54,7 +54,9 @@ def convert(path, ms_window=20, overwrite=True):
 
 
 class Dataset:
-    def __init__(self, path):
+    def __init__(self, path, n_past_entries=0):
+        self.n_past_entries = n_past_entries
+
         if os.path.isfile(path):
             # Load single numpy file
             npy_files = [path]
@@ -66,56 +68,57 @@ class Dataset:
             if len(npy_files) == 0:
                 raise FileNotFoundError('No numpy arrays found!')
 
-        # Load numpy array data in a single long tensor
-        self.data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1)
+        # Load numpy array data in a single long tensor and fill start and end with zeros
+        self.data = np.concatenate([
+            np.zeros((88, n_past_entries, 2)),
+            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
+            np.zeros((88, n_past_entries, 2))
+        ], axis=1)
 
-    def next_batch(self, n_samples, n_past_entries=0):
+    def next_batch(self, n_samples):
         # Initialize result tensor with zeros
         hands = np.zeros((
-            88,                  # 88 keys on a piano
-            n_past_entries + 1,  # Number of entries per sample
-            2,                   # Left and right hand = 2 hands
-            n_samples            # Number of samples per batch
+            88,                       # 88 keys on a piano
+            self.n_past_entries + 1,  # Number of entries per sample
+            2,                        # Left and right hand = 2 hands
+            n_samples                 # Number of samples per batch
         ), dtype=np.bool)
 
         # Get total number of entries
-        n_entries_total = self.data.shape[1]
+        n_entries_total = self.data.shape[1] - self.n_past_entries
 
         for sample in range(n_samples):
-            # Pick a random left boundary for the extracted data
-            start = random.randrange(n_entries_total + n_past_entries)
+            # Pick a random starting point in the dataset...
+            start = random.randrange(n_entries_total)
+            # ... and extract (n_past_entries + 1) samples
+            hands[:, :, :, sample] = self.data[:, start:start+self.n_past_entries+1, :]
 
-            # Extract data and fill with zeros if necessary
-            if start >= n_entries_total:
-                data = np.concatenate([
-                    self.data[:, start - n_past_entries:, :],
-                    np.zeros((88, start - n_entries_total + 1, 2), dtype=np.bool)
-                ], axis=1)
-            elif start < n_past_entries:
-                data = np.concatenate([
-                    np.zeros((88, n_past_entries - start, 2), dtype=np.bool),
-                    self.data[:, 0:start + 1, :]
-                ], axis=1)
-            else:
-                data = self.data[:, start - n_past_entries:start + 1, :]
+        # Merge both hands in a single tensor
+        batch_x = np.logical_or(
+            hands[:, :, 0, :],
+            hands[:, :, 1, :]
+        ).astype(np.int8)
+        # Subtract left from right hand, so that
+        # -1 => left hand
+        # +1 => right hand
+        #  0 => not played (or both hands!)
+        #
+        # Only last 'column' is returned since it is the only one of relevance for the output
+        batch_y = hands[:, :, 0, -1].astype(np.int8) -\
+                  hands[:, :, 1, -1].astype(np.int8)
 
-            hands[:, :, :, sample] = data
-
-            # import matplotlib.pyplot as plt
-            # tmp = (data[:, :, 0].astype(np.int8) - data[:, :, 1].astype(np.int8))
-            # plt.imshow(tmp, cmap='bwr', origin='lower', vmin=-1, vmax=1)
-            # mng = plt.get_current_fig_manager()
-            # mng.window.showMaximized()
-            # plt.show()
-
-        hands_88 = np.logical_or(hands[:, :, 0, :], hands[:, :, 1, :]).astype(np.int8)
-        hands_176 = hands[:, :, 0, :].astype(np.int8) - hands[:, :, 1, :].astype(np.int8)
-
-        return hands_88, hands_176
+        return batch_x, batch_y
 
 
 if __name__ == '__main__':
     convert(path='data', ms_window=20, overwrite=False)
-    foo = Dataset('data')
-    for i in range(100):
-        foo.next_batch(400, n_past_entries=100)
+    foo = Dataset('data', n_past_entries=100)
+    for i in range(10000):
+        batch_x, batch_y = foo.next_batch(400)
+
+        # import matplotlib.pyplot as plt
+        # tmp = batch_y[:, :, 0]
+        # plt.imshow(tmp, cmap='bwr', origin='lower', vmin=-1, vmax=1)
+        # mng = plt.get_current_fig_manager()
+        # mng.window.showMaximized()
+        # plt.show()
