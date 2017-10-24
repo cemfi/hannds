@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import datetime
 
-from data import Dataset
+from hannds import Dataset, convert
 
 import numpy as np
 
@@ -16,7 +16,7 @@ if sys.platform == 'darwin':
 
 # logging.basicConfig(level=logging.DEBUG)
 
-LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H:%M').replace(':', '-'))
+LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H-%M'))
 
 
 def get_figure():
@@ -39,27 +39,29 @@ def figure_to_summary(fig):
 
 
 # Import data
-data = Dataset('./data')
+path = os.path.join('.', 'data')
+convert(path)
+data = Dataset(path)
 
 PAST_SAMPLES = 1
 
 # Create the model
 x = tf.placeholder(tf.float32, [None, 88 * PAST_SAMPLES], name='input')
-W = tf.Variable(tf.zeros([88 * PAST_SAMPLES, 88]))
-b = tf.Variable(tf.zeros([88]))
-y = tf.sigmoid(tf.matmul(x, W) + b)
+W_1 = tf.Variable(tf.zeros([88 * PAST_SAMPLES, 88]))
+W_2 = tf.Variable(tf.zeros([88, 1000]))
+W_3 = tf.Variable(tf.zeros([1000, 88]))
+b_1 = tf.Variable(tf.zeros([88]))
+b_2 = tf.Variable(tf.zeros([1000]))
+b_3 = tf.Variable(tf.zeros([88]))
+h_1 = tf.sigmoid(tf.matmul(x, W_1) + b_1)
+h_2 = tf.sigmoid(tf.matmul(h_1, W_2) + b_2)
+
+y = tf.sigmoid(tf.matmul(h_2, W_3) + b_3)
 
 # Define loss and optimizer
-y_ = tf.placeholder(tf.float32, [None, 88])
+y_ = tf.placeholder(tf.float32, [None, 88])  # -1 ... +1
 truth = (y_ + 1.0) / 2.0
 loss = tf.reduce_mean(tf.squared_difference(y, truth))
-
-# right_hand = tf.cast(tf.greater(y_,  0.9), tf.float32)
-# left_hand  = tf.cast(tf.less(y_, -0.9), tf.float32)
-# right_hand_log_prob = tf.multiply(tf.log(y), right_hand)
-# left_hand_log_prob  = tf.multiply(tf.log(1.0 - y), left_hand)
-# loss = -(tf.reduce_sum(right_hand_log_prob) + tf.reduce_sum(left_hand_log_prob))
-
 train_step = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
 
 # Calculate error rate
@@ -84,7 +86,7 @@ with tf.Session() as sess:
     TRAINING_STEPS = 10000
 
     for i in range(TRAINING_STEPS):
-        batch_xs, batch_ys = data.next_batch(400, past_samples=PAST_SAMPLES)
+        batch_xs, batch_ys = data.next_batch(400, n_past_windows=50)
         _, error_rate_val, result, any = sess.run([
             train_step,
             error_rate_summary,
@@ -94,7 +96,7 @@ with tf.Session() as sess:
 
         # Write output as image to summary
         fig = get_figure()
-        plt.imshow(result.T, cmap='seismic', origin='lower', vmin=-1, vmax=1)
+        plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         plt.tight_layout()
         writer.add_summary(figure_to_summary(fig), i)
 
