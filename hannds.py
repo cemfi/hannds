@@ -5,13 +5,11 @@ import os
 import random
 
 import pretty_midi
-from numba import jit
 import numpy as np
 
 logging.basicConfig(level=logging.DEBUG)
 
 
-@jit
 def convert(path, ms_window=20, overwrite=True):
     if os.path.isfile(path):
         # Load single midi file
@@ -71,7 +69,7 @@ class Dataset:
         # Load numpy array data in a single long array and fill start and end with zeros
         self.data = np.concatenate([
             np.zeros((88, n_past_samples, 2)),
-            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
+            np.concatenate([np.load(npy_file, mmap_mode='r') for npy_file in npy_files], axis=1),
             np.zeros((88, n_past_samples, 2))
         ], axis=1)
 
