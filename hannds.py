@@ -68,7 +68,7 @@ class Dataset:
         ], axis=1)
 
     def next_batch(self, n_samples):
-        # Initialize hands array with zeros
+        # Initialize arrays
         hands = np.zeros((
             88,                       # 88 keys on a piano
             self.n_windows_past + 1,  # Number of past windows considered
@@ -76,12 +76,9 @@ class Dataset:
             n_samples                 # Number of samples per batch
         ), dtype=np.bool)
 
-        # Get total number of windows
-        n_windows_total = self.data.shape[1] - self.n_windows_past
-
         for sample in range(n_samples):
             # Pick random starting point in dataset...
-            start = random.randrange(n_windows_total)
+            start = random.randrange(self.data.shape[1] - self.n_windows_past)
             # ...and extract samples
             hands[:, :, :, sample] = self.data[:, start:start + self.n_windows_past + 1, :]
 
@@ -102,9 +99,9 @@ class Dataset:
         #    +1 => right hand
         #     0 => both hands
         #   nan => no hand
-        batch_y = np.full((hands.shape[0], hands.shape[3]), np.nan)
+        batch_y = np.full((88, n_samples), np.nan)
         batch_y[hands[:, -1, 0, :]] = -1
-        batch_y[hands[:, -1, 1, :]] = 1
+        batch_y[hands[:, -1, 1, :]] = +1
         batch_y[both[:, -1, :]] = 0
 
         return batch_x, batch_y
@@ -113,11 +110,14 @@ class Dataset:
 if __name__ == '__main__':
     convert(path='data', ms_window=20, overwrite=False)
     foo = Dataset('data', n_samples_past=100)
-    for i in range(10000):
-        batch_x, batch_y = foo.next_batch(400)
+    import timeit
 
-        # import matplotlib.pyplot as plt
-        # plt.imshow(batch_x[:, :, 0], cmap='bwr', origin='lower', vmin=-1, vmax=1)
-        # mng = plt.get_current_fig_manager()
-        # mng.window.showMaximized()
-        # plt.show()
+    print(timeit.timeit('foo.next_batch(400)', number=100, globals=globals()))
+    # for i in range(10):
+    #     batch_x, batch_y = foo.next_batch(400)
+    #
+    #     import matplotlib.pyplot as plt
+    #     plt.imshow(batch_x[:, :, 0], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+    #     mng = plt.get_current_fig_manager()
+    #     mng.window.showMaximized()
+    #     plt.show()
