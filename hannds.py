@@ -4,6 +4,8 @@ import math
 import os
 import random
 
+from numpy.lib import format
+
 import pretty_midi
 import numpy as np
 
@@ -69,7 +71,7 @@ class Dataset:
         # Load numpy array data in a single long array and fill start and end with zeros
         self.data = np.concatenate([
             np.zeros((88, n_past_samples, 2)),
-            np.concatenate([np.load(npy_file, mmap_mode='r') for npy_file in npy_files], axis=1),
+            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
             np.zeros((88, n_past_samples, 2))
         ], axis=1)
 
@@ -89,7 +91,7 @@ class Dataset:
             # Pick random starting point in dataset...
             start = random.randrange(n_samples_total)
             # ...and extract samples
-            hands[:, :, :, sample] = self.data[:, start:start+self.n_past_samples + 1, :]
+            hands[:, :, :, sample] = self.data[:, start:start + self.n_past_samples + 1, :]
 
         # Merge both hands in a single array
         batch_x = np.logical_or(
@@ -97,14 +99,23 @@ class Dataset:
             hands[:, :, 1, :]
         )
 
-        # Subtract left from right hand, so that
+        # Mark if both hands are played simultaneously
+        both = np.logical_and(
+            hands[:, :, 0, :],
+            hands[:, :, 1, :]
+        )
+
+        # Return last played sample of every batch sample:
         #   -1 => left hand
         #   +1 => right hand
-        #    0 => not played (or both hands!)
+        #    0 => both hands
+        #  nan => no hand
         # Only last played sample of batch is returned since
         # it is the only one of relevance for the output
-        batch_y = hands[:, -1, 0, :].astype(np.int8) -\
-                  hands[:, -1, 1, :].astype(np.int8)
+        batch_y = np.full((hands.shape[0], hands.shape[3]), np.nan)
+        batch_y[hands[:, -1, 0, :]] = -1
+        batch_y[hands[:, -1, 1, :]] = 1
+        batch_y[both[:, -1, :]] = 0
 
         return batch_x, batch_y
 
@@ -115,10 +126,10 @@ if __name__ == '__main__':
     for i in range(10000):
         batch_x, batch_y = foo.next_batch(400)
 
-
         # import matplotlib.pyplot as plt
-        # tmp = batch_y[:, :, 0]
-        # plt.imshow(tmp, cmap='bwr', origin='lower', vmin=-1, vmax=1)
+        # batch_y= np.nan_to_num(batch_y)
+        # print(batch_y)
+        # plt.imshow(batch_y, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         # mng = plt.get_current_fig_manager()
         # mng.window.showMaximized()
         # plt.show()
