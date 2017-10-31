@@ -39,9 +39,9 @@ def convert(path, ms_window=20, overwrite=True):
             # Generate empty numpy arrays
             n_windows = math.ceil(midi.get_end_time() * samples_per_sec)
             hands = np.zeros((
-                88,         # 88 keys on a piano
-                n_windows,  # Number of windows to calculate
-                2           # Left and right hand = 2 hands
+                n_windows, # Number of windows to calculate
+                2,         # Left and right hand = 2 hands
+                88         # 88 keys on a piano
             ), dtype=np.bool)
 
             # Fill array with data
@@ -49,7 +49,7 @@ def convert(path, ms_window=20, overwrite=True):
                 for note in midi_hand.notes:
                     start = int(math.floor(note.start * samples_per_sec))
                     end = int(math.ceil(note.end * samples_per_sec))
-                    hands[note.pitch - 21, start:end, hand] = True
+                    hands[start:end, hand, note.pitch - 21] = True
 
             # Save array to disk
             np.save(npy_file, hands)
@@ -62,25 +62,25 @@ class Dataset:
 
         # Load numpy array data in a single long array and fill start and end with zeros
         self.data = np.concatenate([
-            np.zeros((88, n_windows_past, 2)),
-            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
-            np.zeros((88, n_windows_past, 2))
-        ], axis=1)
+            np.zeros((n_windows_past, 2, 88)),
+            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0),
+            np.zeros((n_windows_past, 2, 88))
+        ], axis=0)
 
     def next_batch(self, n_samples):
         # Initialize arrays
         hands = np.zeros((
-            88,                       # 88 keys on a piano
+            n_samples,                # Number of samples per batch
             self.n_windows_past + 1,  # Number of past windows considered
             2,                        # Left and right hand = 2 hands
-            n_samples                 # Number of samples per batch
+            88                        # 88 keys on a piano
         ), dtype=np.bool)
 
         for sample in range(n_samples):
             # Pick random starting point in dataset...
-            start = random.randrange(self.data.shape[1] - self.n_windows_past)
+            start = random.randrange(self.data.shape[0] - self.n_windows_past)
             # ...and extract samples
-            hands[:, :, :, sample] = self.data[:, start:start + self.n_windows_past + 1, :]
+            hands[sample, :, :, :] = self.data[start:start + self.n_windows_past + 1, :, :]
 
         # Merge both hands in a single array
         batch_x = np.logical_or(
@@ -99,7 +99,7 @@ class Dataset:
         #    +1 => right hand
         #     0 => both hands
         #   nan => no hand
-        batch_y = np.full((88, n_samples), np.nan)
+        batch_y = np.full((n_samples, 88), np.nan)
         batch_y[hands[:, -1, 0, :]] = -1
         batch_y[hands[:, -1, 1, :]] = +1
         batch_y[both[:, -1, :]] = 0
@@ -108,7 +108,7 @@ class Dataset:
 
 
 if __name__ == '__main__':
-    convert(path='data', ms_window=20, overwrite=False)
+    convert(path='data', ms_window=20, overwrite=True)
     foo = Dataset('data', n_windows_past=100)
     import timeit
 
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     #    batch_x, batch_y = foo.next_batch(400)
 
     #    import matplotlib.pyplot as plt
-    #    plt.imshow(batch_x[:, :, 0], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+    #    plt.imshow(batch_x[0, :, :], cmap='bwr', origin='lower', vmin=-1, vmax=1)
     #    mng = plt.get_current_fig_manager()
     #    mng.window.showMaximized()
     #    plt.show()

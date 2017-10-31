@@ -87,9 +87,7 @@ with tf.Session() as sess:
 
     for i in range(TRAINING_STEPS):
         batch_xs, batch_ys = data.next_batch(400)
-        batch_xs = batch_xs.reshape([88, 400 * PAST_SAMPLES])
-        batch_xs = batch_xs.swapaxes(0, 1)
-        batch_ys = batch_ys.swapaxes(0, 1)
+        batch_xs = batch_xs.reshape([400 * PAST_SAMPLES, 88])
         _, error_rate_sum, result, any = sess.run([
             train_step,
             error_rate_summary,
