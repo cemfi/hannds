@@ -56,19 +56,41 @@ with tf.name_scope('preprocessing'):
 
     y_labels = tf.placeholder(tf.float32, [None, 88], name='labels')  # -1 ... +1
     y_labels_non_nans = tf.where(tf.is_nan(y_labels), tf.zeros_like(y_labels), y_labels, name='replace_nans_y')
+    y_labels_01 = (y_labels_non_nans + 1.0) / 2.0 # needed for cross-entropy calculation
 
 with tf.name_scope('nn'):
     b_1 = tf.Variable(tf.zeros([88]))
-    y_output = b_1
+    h_last = b_1
+        
+    # for squared error loss
+    # y_output = tf.tanh(h_last)
+
+    # for cross-entropy loss
+    y_output = (tf.sigmoid(h_last) * 2.0) - 1.0
+
+
 
 with tf.name_scope('optimizer'):
-    masked_prediction = tf.multiply(y_output, x_input_no_nans) # works only for PAST_SAMPLES == 1
-    loss = tf.reduce_mean(tf.squared_difference(y_labels_non_nans, masked_prediction))
+    masked_predictions = tf.multiply(y_output, tf.abs(x_input_no_nans)) # works only for PAST_SAMPLES == 1
+    # squared error loss
+    # loss = tf.losses.mean_pairwise_squared_error(y_labels_non_nans, masked_predictions)
+
+    # DIY
+    # loss = tf.reduce_mean(tf.squared_difference(y_labels_non_nans, masked_prediction))
+
+    # cross-entropy = maximum-likelyhood loss
+    y_output_01 = (y_output + 1.0) / 2.0
+    EPSILON = 1E-6
+    log_prob_right = tf.multiply(tf.log(y_output_01 + EPSILON), tf.abs(x_input_no_nans))
+    log_prob_left  = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_input_no_nans))
+    log_likely = tf.reduce_sum(tf.multiply(y_labels_01, log_prob_right)) + tf.reduce_sum(tf.multiply(1.0 - y_labels_01, log_prob_left))
+    loss = -log_likely
+
     train_step = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
 
 # Calculate error rate
 with tf.name_scope('evaluation'):
-    categories = tf.sign(masked_prediction)
+    categories = tf.sign(masked_predictions)
     errors = tf.cast(tf.not_equal(categories, y_labels_non_nans), tf.float32)
     num_errors = tf.reduce_sum(errors)
     num_notes = tf.maximum(tf.reduce_sum(tf.abs(y_labels_non_nans)), 1)
@@ -86,24 +108,24 @@ with tf.Session() as sess:
     TRAINING_STEPS = 10000
     BATCH_SIZE = 100
 
-    for i in range(TRAINING_STEPS):
+    for i in range(TRAINING_STEPS + 1):
         batch_xs, batch_ys = data.next_batch(BATCH_SIZE)
         batch_xs = batch_xs.reshape([BATCH_SIZE * PAST_SAMPLES, 88])
         _, error_rate_sum, result, error_rate_value, output_wildcard = sess.run([
             train_step,
             error_rate_summary,
-            masked_prediction,
+            masked_predictions,
             error_rate,
             b_1
         ], feed_dict={x_input: batch_xs, y_labels: batch_ys})
         if i % 100 == 0:
-            print('step = ', i, ", error_rate = ", error_rate_value)
+            print('step =', i, ", error_rate =", error_rate_value)
             # print('wildcard = \n', output_wildcard)
 
         # Write output as image to summary
-        fig = get_figure()
-        plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
-        plt.tight_layout()
+        # fig = get_figure()
+        # plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
+        # plt.tight_layout()
         # writer.add_summary(figure_to_summary(fig), i)
 
         # Write other values to summary
