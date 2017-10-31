@@ -56,15 +56,15 @@ def convert(path, ms_window=20, overwrite=True):
 
 
 class Dataset:
-    def __init__(self, path, n_samples_past=0):
-        self.n_windows_past = n_samples_past
+    def __init__(self, path, n_windows_past=0):
+        self.n_windows_past = n_windows_past
         npy_files = get_files_from_path(path, ['*.npy'])
 
         # Load numpy array data in a single long array and fill start and end with zeros
         self.data = np.concatenate([
-            np.zeros((88, n_samples_past, 2)),
+            np.zeros((88, n_windows_past, 2)),
             np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=1),
-            np.zeros((88, n_samples_past, 2))
+            np.zeros((88, n_windows_past, 2))
         ], axis=1)
 
     def next_batch(self, n_samples):
@@ -109,15 +109,15 @@ class Dataset:
 
 if __name__ == '__main__':
     convert(path='data', ms_window=20, overwrite=False)
-    foo = Dataset('data', n_samples_past=100)
+    foo = Dataset('data', n_windows_past=100)
     import timeit
 
-    print(timeit.timeit('foo.next_batch(400)', number=100, globals=globals()))
-    # for i in range(10):
-    #     batch_x, batch_y = foo.next_batch(400)
-    #
-    #     import matplotlib.pyplot as plt
-    #     plt.imshow(batch_x[:, :, 0], cmap='bwr', origin='lower', vmin=-1, vmax=1)
-    #     mng = plt.get_current_fig_manager()
-    #     mng.window.showMaximized()
-    #     plt.show()
+    print("%.2f usec / batch" % timeit.timeit('foo.next_batch(400)', number=100, globals=globals()))
+    #for i in range(10):
+    #    batch_x, batch_y = foo.next_batch(400)
+
+    #    import matplotlib.pyplot as plt
+    #    plt.imshow(batch_x[:, :, 0], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+    #    mng = plt.get_current_fig_manager()
+    #    mng.window.showMaximized()
+    #    plt.show()

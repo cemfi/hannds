@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import datetime
 
-from hannds import Dataset, convert
+from import_data import Dataset, convert
 
 import numpy as np
 
@@ -40,7 +40,7 @@ def figure_to_summary(fig):
 
 # Import data
 path = os.path.join('.', 'data')
-convert(path)
+convert(path, overwrite=False)
 data = Dataset(path)
 
 PAST_SAMPLES = 1
@@ -59,7 +59,7 @@ h_2 = tf.sigmoid(tf.matmul(h_1, W_2) + b_2)
 y = tf.sigmoid(tf.matmul(h_2, W_3) + b_3)
 
 # Define loss and optimizer
-y_ = tf.placeholder(tf.float32, [None, 88])  # -1 ... +1
+y_ = tf.placeholder(tf.float32, [None, 88], name='labels')  # -1 ... +1
 truth = (y_ + 1.0) / 2.0
 loss = tf.reduce_mean(tf.squared_difference(y, truth))
 train_step = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
@@ -74,7 +74,7 @@ num_notes = tf.reduce_sum(tf.abs(y_))
 error_rate = num_errors / num_notes
 
 # Summary
-error_rate_summary = tf.summary.scalar('error rate', error_rate)
+error_rate_summary = tf.summary.scalar('error_rate', error_rate)
 image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
 image_summary = tf.summary.image('output', image_placeholder)
 
@@ -86,19 +86,24 @@ with tf.Session() as sess:
     TRAINING_STEPS = 10000
 
     for i in range(TRAINING_STEPS):
-        batch_xs, batch_ys = data.next_batch(400, n_past_entries=50)
-        _, error_rate_val, result, any = sess.run([
+        batch_xs, batch_ys = data.next_batch(400)
+        batch_xs = batch_xs.reshape([88, 400 * PAST_SAMPLES])
+        batch_xs = batch_xs.swapaxes(0, 1)
+        batch_ys = batch_ys.swapaxes(0, 1)
+        _, error_rate_sum, result, any = sess.run([
             train_step,
             error_rate_summary,
             masked_prediction,
             y
         ], feed_dict={x: batch_xs, y_: batch_ys})
+        if i % 100 == 0:
+            print('step = ', i)
 
         # Write output as image to summary
         fig = get_figure()
         plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         plt.tight_layout()
-        writer.add_summary(figure_to_summary(fig), i)
+        # writer.add_summary(figure_to_summary(fig), i)
 
         # Write other values to summary
-        writer.add_summary(error_rate_val, i)
+        writer.add_summary(error_rate_sum, i)

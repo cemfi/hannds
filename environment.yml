@@ -14,4 +14,4 @@ dependencies:
   - pip
   - pip:
     - mido
-    - tensorflow
+    - tensorflow-gpu
