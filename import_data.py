@@ -100,8 +100,8 @@ class Dataset:
         #     0 => both hands
         #   nan => no hand
         batch_y = np.full((n_samples, 88), np.nan)
-        batch_y[hands[:, -1, 0, :]] = -1
-        batch_y[hands[:, -1, 1, :]] = +1
+        batch_y[hands[:, -1, 0, :]] = +1
+        batch_y[hands[:, -1, 1, :]] = -1
         batch_y[both[:, -1, :]] = 0
 
         return batch_x, batch_y
