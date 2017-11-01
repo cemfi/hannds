@@ -60,8 +60,9 @@ with tf.name_scope('preprocessing'):
 
 with tf.name_scope('nn'):
     b_1 = tf.Variable(tf.zeros([88]))
-    h_last = b_1
-        
+    W_1 = tf.Variable(tf.zeros([PAST_SAMPLES * 88, 88]))
+    h_last = tf.matmul(x_input_no_nans, W_1) + b_1
+
     # for squared error loss
     # y_output = tf.tanh(h_last)
 
