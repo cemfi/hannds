@@ -47,22 +47,22 @@ data = Dataset(path, n_windows_past=PAST_WINDOWS)
 
 # Create the model
 with tf.name_scope('preprocessing'):
-    x_input = tf.placeholder(tf.float32, [None, 88 * (PAST_WINDOWS + 1)], name='input')
-    x_input_no_nans = tf.where(tf.is_nan(x_input), tf.zeros_like(x_input), x_input, name='replace_nans_x')
-    x_input_last = x_input_no_nans[:, -88:]
+    x_in = tf.placeholder(tf.float32, [None, 88 * (PAST_WINDOWS + 1)], name='input')
+    x_no_nans = tf.where(tf.is_nan(x_in), tf.zeros_like(x_in), x_in, name='replace_nans_x')
+    x_last_win = x_no_nans[:, -88:]
 
     # -1: left hand
     #  1: right hand
     #  0: not played or simultaneously plyaed by both hands
 
     y_labels = tf.placeholder(tf.float32, [None, 88], name='labels')  # -1 ... +1
-    y_labels_non_nans = tf.where(tf.is_nan(y_labels), tf.zeros_like(y_labels), y_labels, name='replace_nans_y')
-    y_labels_01 = (y_labels_non_nans + 1.0) / 2.0 # needed for cross-entropy calculation
+    y_non_nans = tf.where(tf.is_nan(y_labels), tf.zeros_like(y_labels), y_labels, name='replace_nans_y')
+    y_01 = (y_non_nans + 1.0) / 2.0 # needed for cross-entropy calculation
 
 with tf.name_scope('nn'):
     b_1 = tf.Variable(tf.zeros([88]))
     W_1 = tf.Variable(tf.zeros([(PAST_WINDOWS + 1) * 88, 88]))
-    h_last = tf.matmul(x_input_no_nans, W_1) + b_1
+    h_last = tf.matmul(x_no_nans, W_1) + b_1
 
     # for squared error loss
     # y_output = tf.tanh(h_last)
@@ -73,7 +73,7 @@ with tf.name_scope('nn'):
 
 
 with tf.name_scope('optimizer'):
-    masked_predictions = tf.multiply(y_output, tf.abs(x_input_last)) # works only for PAST_WINDOWS == 0
+    masked_predictions = tf.multiply(y_output, tf.abs(x_last_win)) # works only for PAST_WINDOWS == 0
     # squared error loss
     # loss = tf.losses.mean_pairwise_squared_error(y_labels_non_nans, masked_predictions)
 
@@ -83,9 +83,9 @@ with tf.name_scope('optimizer'):
     # cross-entropy = maximum-likelyhood loss
     y_output_01 = (y_output + 1.0) / 2.0
     EPSILON = 1E-6
-    log_prob_right = tf.multiply(tf.log(y_output_01 + EPSILON), tf.abs(x_input_last))
-    log_prob_left  = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_input_last))
-    log_likely = tf.reduce_sum(tf.multiply(y_labels_01, log_prob_right)) + tf.reduce_sum(tf.multiply(1.0 - y_labels_01, log_prob_left))
+    log_prob_right = tf.multiply(tf.log(y_output_01 + EPSILON), tf.abs(x_last_win))
+    log_prob_left  = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_last_win))
+    log_likely = tf.reduce_sum(tf.multiply(y_01, log_prob_right)) + tf.reduce_sum(tf.multiply(1.0 - y_01, log_prob_left))
     loss = -log_likely
 
     train_step = tf.train.GradientDescentOptimizer(0.5).minimize(loss)
@@ -93,9 +93,9 @@ with tf.name_scope('optimizer'):
 # Calculate error rate
 with tf.name_scope('evaluation'):
     categories = tf.sign(masked_predictions)
-    errors = tf.cast(tf.not_equal(categories, y_labels_non_nans), tf.float32)
+    errors = tf.cast(tf.not_equal(categories, y_non_nans), tf.float32)
     num_errors = tf.reduce_sum(errors)
-    num_notes = tf.maximum(tf.reduce_sum(tf.abs(y_labels_non_nans)), 1)
+    num_notes = tf.maximum(tf.reduce_sum(tf.abs(y_non_nans)), 1)
     error_rate = num_errors / num_notes
 
 # Summaries
@@ -120,7 +120,7 @@ with tf.Session() as sess:
             error_rate,
             b_1,
             y_output
-        ], feed_dict={x_input: batch_xs, y_labels: batch_ys})
+        ], feed_dict={x_in: batch_xs, y_labels: batch_ys})
         if i % 100 == 0:
             print('step =', i, ", error_rate =", error_rate_value)
             # print('wildcard = \n', output_wildcard)
