@@ -110,7 +110,7 @@ error_rate_summary = tf.summary.scalar('error_rate', error_rate)
 log_likely_summary = tf.summary.scalar('log_likely', log_likely)
 image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
 # image_summary = tf.summary.image('output', image_placeholder)
-merged_summary = tf.summary.merge_all();
+merged_summary = tf.summary.merge_all()
 
 with tf.Session() as sess:
     writer = tf.summary.FileWriter(LOG_PATH)
@@ -118,8 +118,13 @@ with tf.Session() as sess:
     tf.global_variables_initializer().run()
     # Train
     for i in range(TRAINING_STEPS + 1):
+
         batch_xs, batch_ys = data.next_batch(BATCH_SIZE)
         batch_xs = batch_xs.reshape([BATCH_SIZE, 88 * (PAST_WINDOWS + 1)])
+        if i % 100 == 0:
+            error_rate_value = sess.run([error_rate], feed_dict={x_in: batch_xs, y_labels: batch_ys})
+            print('step =', i, ", error_rate =", error_rate_value)
+
         _, merged_sum, result, error_rate_value, output_wildcard, any = sess.run([
             train_step,
             merged_summary,
@@ -128,9 +133,7 @@ with tf.Session() as sess:
             b_last,
             y_output
         ], feed_dict={x_in: batch_xs, y_labels: batch_ys})
-        if i % 100 == 0:
-            print('step =', i, ", error_rate =", error_rate_value)
-            # print('wildcard = \n', output_wildcard)
+
 
         # Write output as image to summary
         # fig = get_figure()
