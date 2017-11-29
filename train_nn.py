@@ -19,7 +19,7 @@ if sys.platform == 'darwin':
 
 # logging.basicConfig(level=logging.DEBUG)
 
-TRAINING_STEPS = 3
+TRAINING_STEPS = 300
 BATCH_SIZE = 100
 LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H-%M'))
 
@@ -116,7 +116,7 @@ merged_summary = tf.summary.merge_all()
 
 # Add ops to save and restore all the variables.
 timestamp = time.strftime("%Y%m%d-%H%M%S")
-builder = SavedModelBuilder(os.path.join('.', 'models/model%s' % timestamp))
+builder = SavedModelBuilder(os.path.join('.', 'models', 'model_{}_pw_{}'.format(timestamp, PAST_WINDOWS)))
 
 
 with tf.Session() as sess:
