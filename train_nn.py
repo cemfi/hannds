@@ -1,3 +1,4 @@
+import time
 import os
 import sys
 
@@ -6,6 +7,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import datetime
+
+from tensorflow.python.saved_model.builder_impl import SavedModelBuilder
 
 from import_data import Dataset, convert
 
@@ -16,7 +19,7 @@ if sys.platform == 'darwin':
 
 # logging.basicConfig(level=logging.DEBUG)
 
-TRAINING_STEPS = 10000
+TRAINING_STEPS = 3
 BATCH_SIZE = 100
 LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H-%M'))
 
@@ -78,7 +81,6 @@ with tf.name_scope('nn'):
     tf.summary.histogram("y_output", y_output)
 
 
-
 with tf.name_scope('optimizer'):
     masked_predictions = tf.multiply(y_output, tf.abs(x_last_win)) # works only for PAST_WINDOWS == 0
     # squared error loss
@@ -91,7 +93,7 @@ with tf.name_scope('optimizer'):
     y_output_01 = (y_output + 1.0) / 2.0
     EPSILON = 1E-6
     log_prob_right = tf.multiply(tf.log(y_output_01 + EPSILON), tf.abs(x_last_win))
-    log_prob_left  = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_last_win))
+    log_prob_left = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_last_win))
     log_likely = tf.reduce_sum(tf.multiply(y_01, log_prob_right)) + tf.reduce_sum(tf.multiply(1.0 - y_01, log_prob_left))
     loss = -log_likely
 
@@ -112,10 +114,17 @@ image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
 # image_summary = tf.summary.image('output', image_placeholder)
 merged_summary = tf.summary.merge_all()
 
+# Add ops to save and restore all the variables.
+timestamp = time.strftime("%Y%m%d-%H%M%S")
+builder = SavedModelBuilder(os.path.join('.', 'models'))
+
+
 with tf.Session() as sess:
     writer = tf.summary.FileWriter(LOG_PATH)
     writer.add_graph(sess.graph)
     tf.global_variables_initializer().run()
+
+    builder.add_meta_graph_and_variables(sess)
     # Train
     for i in range(TRAINING_STEPS + 1):
 
@@ -134,7 +143,6 @@ with tf.Session() as sess:
             y_output
         ], feed_dict={x_in: batch_xs, y_labels: batch_ys})
 
-
         # Write output as image to summary
         # fig = get_figure()
         # plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
@@ -144,3 +152,5 @@ with tf.Session() as sess:
         # Write other values to summary
         if i % 50 == 0:
             writer.add_summary(merged_sum, i)
+
+builder.save()
