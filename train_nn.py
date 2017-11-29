@@ -116,7 +116,7 @@ merged_summary = tf.summary.merge_all()
 
 # Add ops to save and restore all the variables.
 timestamp = time.strftime("%Y%m%d-%H%M%S")
-builder = SavedModelBuilder(os.path.join('.', 'models'))
+builder = SavedModelBuilder(os.path.join('.', 'models/model%s' % timestamp))
 
 
 with tf.Session() as sess:
@@ -124,7 +124,7 @@ with tf.Session() as sess:
     writer.add_graph(sess.graph)
     tf.global_variables_initializer().run()
 
-    builder.add_meta_graph_and_variables(sess)
+    builder.add_meta_graph_and_variables(sess, ["hannds v0.1"])
     # Train
     for i in range(TRAINING_STEPS + 1):
 
