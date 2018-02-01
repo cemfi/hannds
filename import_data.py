@@ -60,14 +60,41 @@ class Dataset:
         self.n_windows_past = n_windows_past
         npy_files = get_files_from_path(path, ['*.npy'])
 
+        npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0)
+        idx_end_train = np.shape(npy_data)[0] * 0.7
+        idx_end_validate = np.shape(npy_data)[0] * 0.9
+
+        print('shape(npy_data) = {}'.format(np.shape(npy_data)))
+
         # Load numpy array data in a single long array and fill start and end with zeros
-        self.data = np.concatenate([
+        self.train_data = np.concatenate([
             np.zeros((n_windows_past, 2, 88)),
-            np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0),
+            npy_data[:idx_end_train,:,:],
             np.zeros((n_windows_past, 2, 88))
         ], axis=0)
 
-    def next_batch(self, n_samples):
+        self.validate_data = np.concatenate([
+            np.zeros((n_windows_past, 2, 88)),
+            npy_data[idx_end_train:idx_end_validate, :, :],
+            np.zeros((n_windows_past, 2, 88))
+        ], axis=0)
+
+        self.test_data = np.concatenate([
+            np.zeros((n_windows_past, 2, 88)),
+            npy_data[idx_end_validate:, :, :],
+            np.zeros((n_windows_past, 2, 88))
+        ], axis=0)
+
+    def next_batch(self, n_samples, what='train'):
+        if what == 'train':
+            data = self.train_data
+        elif what == 'validate':
+            data = self.validate_data
+        elif what == 'test':
+            data = self.test_data
+        else:
+            raise 'invalid request'
+
         # Initialize arrays
         hands = np.zeros((
             n_samples,                # Number of samples per batch
@@ -78,9 +105,9 @@ class Dataset:
 
         for sample in range(n_samples):
             # Pick random starting point in dataset...
-            start = random.randrange(self.data.shape[0] - self.n_windows_past)
+            start = random.randrange(data.shape[0] - self.n_windows_past)
             # ...and extract samples
-            hands[sample, :, :, :] = self.data[start:start + self.n_windows_past + 1, :, :]
+            hands[sample, :, :, :] = data[start:start + self.n_windows_past + 1, :, :]
 
         # Merge both hands in a single array
         batch_x = np.logical_or(
