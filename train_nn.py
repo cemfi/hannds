@@ -3,6 +3,8 @@ import os
 import sys
 
 import matplotlib
+if sys.platform == 'darwin':
+    matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -13,9 +15,6 @@ from tensorflow.python.saved_model.builder_impl import SavedModelBuilder
 from import_data import Dataset, convert
 
 import numpy as np
-
-if sys.platform == 'darwin':
-    matplotlib.use('Agg')
 
 # logging.basicConfig(level=logging.DEBUG)
 

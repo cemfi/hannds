@@ -61,8 +61,8 @@ class Dataset:
         npy_files = get_files_from_path(path, ['*.npy'])
 
         npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0)
-        idx_end_train = np.shape(npy_data)[0] * 0.7
-        idx_end_validate = np.shape(npy_data)[0] * 0.9
+        idx_end_train = int(np.shape(npy_data)[0] * 0.7)
+        idx_end_validate = int(np.shape(npy_data)[0] * 0.9)
 
         print('shape(npy_data) = {}'.format(np.shape(npy_data)))
 
