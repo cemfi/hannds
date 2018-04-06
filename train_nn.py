@@ -19,7 +19,7 @@ import numpy as np
 # logging.basicConfig(level=logging.DEBUG)
 
 TRAINING_STEPS = 300
-BATCH_SIZE = 100
+BATCH_SIZE = 100 
 LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H-%M'))
 
 
