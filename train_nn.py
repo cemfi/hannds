@@ -1,6 +1,7 @@
 import datetime as dt
 import math
 import argparse
+import os
 
 import torch
 from torch import nn
@@ -31,6 +32,8 @@ def main():
 
     # Train
     model = train(args, train_data, validate_data)
+    if not os.path.exists('models'):
+        os.mkdir('models')
     torch.save(model, 'models/' + make_filename(args))
 
 
