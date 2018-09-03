@@ -69,7 +69,7 @@ def evaluate_model(input, output, labels):
     with PdfPages('results.pdf') as pdf:
         for i in reversed(range(32)):
             fig, ax = plt.subplots()
-            ax.imshow(output[i * 100:(i + 1) * 100], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+            ax.imshow(output[i * 100:(i + 1) * 100], cmap='coolwarm', origin='lower', vmin=-1, vmax=1)
             pdf.savefig(fig)
             plt.close()
 
