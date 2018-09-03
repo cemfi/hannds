@@ -1,18 +1,16 @@
-name: hannds
+name: pytorch
 
 channels:
-  - conda-forge
+  - pytorch
 
 dependencies:
-  - python=3.5
-  - setuptools
-  - numpy
-  - numba
-  - scipy
-  - pyqt
+  - python=3.6
+  - tensorboard
   - matplotlib
+  - pytorch
+  - cudatoolkit
   - pip
   - pip:
     - mido
     - git+https://github.com/craffel/pretty-midi.git
-    - tensorflow-gpu
+    - tensorboardx

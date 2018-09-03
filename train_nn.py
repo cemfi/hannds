@@ -1,155 +1,160 @@
-import time
-import os
-import sys
+import datetime as dt
+import math
+import argparse
 
-import matplotlib
-if sys.platform == 'darwin':
-    matplotlib.use('Agg')
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 
-import matplotlib.pyplot as plt
-import tensorflow as tf
-import datetime
+from hannds_data import train_test_data, convert
 
-from tensorflow.python.saved_model.builder_impl import SavedModelBuilder
+DEBUG_MODE = True
+USE_CUDA = True
 
-from import_data import Dataset, convert
-
-import numpy as np
-
-# logging.basicConfig(level=logging.DEBUG)
-
-TRAINING_STEPS = 300
-BATCH_SIZE = 100 
-LOG_PATH = os.path.join('logs', datetime.datetime.now().strftime('%H-%M'))
+DEVICE = torch.device('cuda' if torch.cuda.is_available() and USE_CUDA else 'cpu')
+print(f"Using {DEVICE}")
 
 
-def get_figure():
-    fig = plt.figure(num=0, figsize=(25, 2.7), dpi=72)
-    fig.clf()
-    return fig
+def main():
+    parser = argparse.ArgumentParser(description='Learn hannds neural net')
+    parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
+    parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length')
+    parser.add_argument('--net', metavar='TYPE', type=str, required=True, help='type of the network: LSTM or RNN')
+    args = parser.parse_args()
 
+    # Load data
+    batch_size = 100
+    train_dataset, validate_dataset = train_test_data('data/', args.length, debug=DEBUG_MODE)
+    train_data = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    validate_data = DataLoader(validate_dataset, batch_size=100)
 
-def fig2rgb_array(fig, expand=True):
-    fig.canvas.draw()
-    buf = fig.canvas.tostring_rgb()
-    ncols, nrows = fig.canvas.get_width_height()
-    shape = (nrows, ncols, 3) if not expand else (1, nrows, ncols, 3)
-    return np.fromstring(buf, dtype=np.uint8).reshape(shape)
-
-
-def figure_to_summary(fig):
-    image = fig2rgb_array(fig)
-    return image_summary.eval(feed_dict={image_placeholder: image})
-
-
-# Import data
-PAST_WINDOWS = 100
-path = os.path.join('.', 'data')
-convert(path, overwrite=False)
-data = Dataset(path, n_windows_past=PAST_WINDOWS)
-
-
-# Create the model
-with tf.name_scope('preprocessing'):
-    x_in = tf.placeholder(tf.float32, [None, 88 * (PAST_WINDOWS + 1)], name='input')
-    x_no_nans = tf.where(tf.is_nan(x_in), tf.zeros_like(x_in), x_in, name='replace_nans_x')
-    x_last_win = x_no_nans[:, -88:]
-
-    # -1: left hand
-    #  1: right hand
-    #  0: not played or simultaneously plyaed by both hands
-
-    y_labels = tf.placeholder(tf.float32, [None, 88], name='labels')  # -1 ... +1
-    y_non_nans = tf.where(tf.is_nan(y_labels), tf.zeros_like(y_labels), y_labels, name='replace_nans_y')
-    y_01 = (y_non_nans + 1.0) / 2.0 # needed for cross-entropy calculation
-
-with tf.name_scope('nn'):
-    b_last = tf.Variable(tf.concat([-1.0 * tf.ones([44]), +1.0 * tf.ones([44])], axis=0))
-    W_last = tf.Variable(tf.truncated_normal([(PAST_WINDOWS + 1) * 88, 88], stddev=0.1))
-    pre_last = tf.matmul(x_no_nans, W_last) + b_last
-
-    # for squared error loss
-    # y_output = tf.tanh(h_last)
-
-    # for cross-entropy loss
-    y_output = (tf.sigmoid(pre_last) * 2.0) - 1.0
-
-    tf.summary.histogram("b_last", b_last)
-    tf.summary.histogram("W_last", W_last)
-    tf.summary.histogram("pre_last", pre_last)
-    tf.summary.histogram("y_output", y_output)
-
-
-with tf.name_scope('optimizer'):
-    masked_predictions = tf.multiply(y_output, tf.abs(x_last_win)) # works only for PAST_WINDOWS == 0
-    # squared error loss
-    # loss = tf.losses.mean_pairwise_squared_error(y_labels_non_nans, masked_predictions)
-
-    # DIY
-    # loss = tf.reduce_mean(tf.squared_difference(y_labels_non_nans, masked_prediction))
-
-    # cross-entropy = maximum-likelyhood loss
-    y_output_01 = (y_output + 1.0) / 2.0
-    EPSILON = 1E-6
-    log_prob_right = tf.multiply(tf.log(y_output_01 + EPSILON), tf.abs(x_last_win))
-    log_prob_left = tf.multiply(tf.log(1.0 - y_output_01 + EPSILON), tf.abs(x_last_win))
-    log_likely = tf.reduce_sum(tf.multiply(y_01, log_prob_right)) + tf.reduce_sum(tf.multiply(1.0 - y_01, log_prob_left))
-    loss = -log_likely
-
-    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
-
-# Calculate error rate
-with tf.name_scope('evaluation'):
-    categories = tf.sign(masked_predictions)
-    errors = tf.cast(tf.not_equal(categories, y_non_nans), tf.float32)
-    num_errors = tf.reduce_sum(errors)
-    num_notes = tf.maximum(tf.reduce_sum(tf.abs(y_non_nans)), 1)
-    error_rate = num_errors / num_notes
-
-# Summaries
-error_rate_summary = tf.summary.scalar('error_rate', error_rate)
-log_likely_summary = tf.summary.scalar('log_likely', log_likely)
-image_placeholder = tf.placeholder(tf.uint8, fig2rgb_array(get_figure()).shape)
-# image_summary = tf.summary.image('output', image_placeholder)
-merged_summary = tf.summary.merge_all()
-
-# Add ops to save and restore all the variables.
-timestamp = time.strftime("%Y%m%d-%H%M%S")
-builder = SavedModelBuilder(os.path.join('.', 'models', 'model_{}_pw_{}'.format(timestamp, PAST_WINDOWS)))
-
-
-with tf.Session() as sess:
-    writer = tf.summary.FileWriter(LOG_PATH)
-    writer.add_graph(sess.graph)
-    tf.global_variables_initializer().run()
-
-    builder.add_meta_graph_and_variables(sess, ["hannds v0.1"])
     # Train
-    for i in range(TRAINING_STEPS + 1):
+    model = train(args, train_data, validate_data)
+    torch.save(model, 'models/' + make_filename(args))
 
-        batch_xs, batch_ys = data.next_batch(BATCH_SIZE)
-        batch_xs = batch_xs.reshape([BATCH_SIZE, 88 * (PAST_WINDOWS + 1)])
-        if i % 100 == 0:
-            error_rate_value = sess.run([error_rate], feed_dict={x_in: batch_xs, y_labels: batch_ys})
-            print('step =', i, ", error_rate =", error_rate_value)
 
-        _, merged_sum, result, error_rate_value, output_wildcard, any = sess.run([
-            train_step,
-            merged_summary,
-            masked_predictions,
-            error_rate,
-            b_last,
-            y_output
-        ], feed_dict={x_in: batch_xs, y_labels: batch_ys})
+def make_filename(args):
+    debug_str = '_debug' if DEBUG_MODE else ''
+    filename = f"{args.net}_layers{args.layers}_len{args.length}{debug_str}.pt"
+    return filename
 
-        # Write output as image to summary
-        # fig = get_figure()
-        # plt.imshow(result.T, cmap='bwr', origin='lower', vmin=-1, vmax=1)
-        # plt.tight_layout()
-        # writer.add_summary(figure_to_summary(fig), i)
 
-        # Write other values to summary
-        if i % 50 == 0:
-            writer.add_summary(merged_sum, i)
+class FFNetwork(nn.Module):
+    def __init__(self, len_sequence):
+        super(FFNetwork, self).__init__()
+        hidden_size = 200
+        self.network = nn.Sequential(
+            nn.Linear(88 * len_sequence, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 88),
+            nn.Tanh())
+        self.len_sequence = len_sequence
 
-builder.save()
+    def forward(self, input):
+        """
+        :param input: (batch_size, len_sequence, 88)
+        :return: (batch_size, 1, 88)
+        """
+        transformed_input = input.view(-1, self.len_sequence * 88)
+        output = self.network.forward(transformed_input)
+        transformed_output = output.view(-1, 1, 88)
+        return transformed_output
+
+
+class RNN(nn.Module):
+    def __init__(self, num_layers):
+        super(RNN, self).__init__()
+        self.rnn = nn.RNN(input_size=88, hidden_size=88, num_layers=num_layers, batch_first=True)
+
+    def forward(self, input):
+        """
+        :param input: (batch_size, len_sequence, 88)
+        :return: (batch_size, len_sequence, 88)
+        """
+        output, hidden = self.rnn.forward(input)
+        return output, hidden
+
+
+class LSTM(nn.Module):
+    def __init__(self, num_layers):
+        super(LSTM, self).__init__()
+        self.rnn = nn.LSTM(input_size=88, hidden_size=88, num_layers=num_layers, batch_first=True)
+
+    def forward(self, input):
+        output, hidden = self.rnn.forward(input)
+        return output, hidden
+
+
+def train(args, train_data, validate_data):
+    # Prepare
+    time = dt.datetime.now().strftime('%m-%d-%H%M-')
+    writer = SummaryWriter('runs/' + time + make_filename(args))
+
+    model = None
+    if args.net.lower() == 'rnn':
+        model = RNN(num_layers=args.layers).to(DEVICE)
+    elif args.net.lower() == 'lstm':
+        model = LSTM(num_layers=args.layers).to(DEVICE)
+    else:
+        raise Exception('Invalid argument')
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
+    n_epochs = 20
+
+    # Train
+    for epoch in range(n_epochs):
+        start = dt.datetime.now()
+        avg_training_loss = 0.0
+        n = 0
+        for X_batch, Y_batch in train_data:  # Gradient descent
+            X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
+            optimizer.zero_grad()
+            output, *_ = model(X_batch)
+            training_loss = criterion(output[:, -1], Y_batch[:, -1])
+            avg_training_loss += training_loss
+            training_loss.backward()
+            if n == 0:
+                for name, param in model.named_parameters():
+                    writer.add_histogram(name + '/data', param.data.clone().cpu().numpy(), epoch)
+                    writer.add_histogram(name + '/grad', param.grad.clone().cpu().numpy(), epoch)
+            optimizer.step()
+            n = n + 1
+        avg_training_loss /= n
+        end_train = dt.datetime.now()
+
+        test_loss = compute_test_loss(model, validate_data)
+        end = dt.datetime.now()
+
+        t_training = (end_train - start).total_seconds()
+        t_testing = (end - end_train).total_seconds()
+        t_total = t_training + t_testing
+
+        print(f"Epoch: {epoch}, duration {t_total:.1f}({t_training:.1f}+{t_testing:.1f})s, "
+              f"log train loss = {math.log(avg_training_loss):.2f}, log test loss = {math.log(test_loss):.2f}")
+
+        writer.add_scalar('loss/training', math.log(avg_training_loss), epoch)
+        writer.add_scalar('loss/validation', math.log(test_loss), epoch)
+
+    return model
+
+
+def compute_test_loss(model, validate_data):
+    with torch.no_grad():  # Compute test error
+        total_loss = 0.0
+        n = 0.0
+        for X_batch, Y_batch in validate_data:
+            X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
+            output, *_ = model(X_batch)
+            criterion = nn.MSELoss()
+            test_loss = criterion(output[:, -1], Y_batch[:, -1])
+            total_loss += test_loss
+            n += 1
+        total_loss /= n
+    return total_loss
+
+
+if __name__ == '__main__':
+    convert('data/', overwrite=False)
+    main()
