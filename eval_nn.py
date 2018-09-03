@@ -1,5 +1,4 @@
 import math
-import sys
 import argparse
 
 import torch
@@ -10,10 +9,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 
 from hannds_data import train_test_data
-import train_nn
 from train_nn import FFNetwork, RNN, LSTM
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def main():
@@ -21,10 +19,9 @@ def main():
     parser.add_argument('--model', metavar='Path', type=str, required=True, help='path to .pt file')
     args = parser.parse_args()
 
-    _, test_dataset = train_test_data('data/', len_sequence_train=-1, debug=DEBUG_MODE)
-    print(f"Test set length = {len(test_dataset)}")
+    _, test_dataset = train_test_data('data/', len_sequence_train=-1, len_sequence_test=-1, debug=DEBUG_MODE)
     validate_data = DataLoader(test_dataset, batch_size=100_000)
-    model = torch.load(args.model)
+    model = torch.load(args.model).cpu()
     input, output, labels, loss = compute_result(model, validate_data)
     print(f"Log validation loss = {math.log(loss):.2f}")
     evaluate_model(input, output, labels)
@@ -32,46 +29,26 @@ def main():
 
 def compute_result(model, validate_data):
     with torch.no_grad():
-        inputs = None
-        labels = None
-        outputs = None
-        total_loss = 0.0
-        n = 0.0
-        for X_batch, Y_batch in validate_data:
-            sys.stdout.write('.')
-            if n % 80 == 79:
-                sys.stdout.write('\n')
-            sys.stdout.flush()
-            output, *_ = model(X_batch)
-            if inputs is None:
-                inputs = X_batch
-                labels = Y_batch[:, -1]
-                outputs = output
-            else:
-                inputs = torch.cat((inputs, X_batch), dim=0)
-                labels = torch.cat((labels, Y_batch[:, -1]), dim=0)
-                outputs = torch.cat((outputs, output), dim=0)
-
-            criterion = nn.MSELoss()
-            test_loss = criterion(output[:, -1], Y_batch[:, -1])
-            total_loss += test_loss
-            n += 1
-        total_loss /= n
-        print("")
-    return inputs.numpy(), outputs.numpy(), labels.numpy(), total_loss
+        X_batch, Y_batch = iter(validate_data).next()
+        output, *_ = model(X_batch)
+        output = output.squeeze()
+        X_batch = X_batch.squeeze()
+        Y_batch = Y_batch.squeeze()
+        criterion = nn.MSELoss()
+        test_loss = criterion(output, Y_batch)
+        return X_batch.numpy(), output.numpy(), Y_batch.numpy(), test_loss
 
 
 def evaluate_model(input, output, labels):
-    output = output[:, -1, :]
-    input = input[:, -1, :]
     output = output * input
 
     with PdfPages('results.pdf') as pdf:
         for i in reversed(range(32)):
-            fig, ax = plt.subplots()
-            ax.imshow(output[i * 100:(i + 1) * 100], cmap='coolwarm', origin='lower', vmin=-1, vmax=1)
-            pdf.savefig(fig)
-            plt.close()
+            if (i + 1) * 100 < output.shape[0]:
+                fig, ax = plt.subplots()
+                ax.imshow(output[i * 100: (i + 1) * 100], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+                pdf.savefig(fig)
+                plt.close()
 
     num_notes = np.sum(input)
     left_hand = output < 0.0

@@ -56,10 +56,11 @@ def convert(path, ms_window=20, overwrite=True):
             np.save(npy_file, hands)
 
 
-def train_test_data(path, len_sequence_train, debug=False):
+def train_test_data(path, len_sequence_train, len_sequence_test, debug=False):
     """
-    returns training and test data. Test data will always be of the
-    shape (1, -1, 88), which is a sequence of maximal length.
+    returns training and test data. If len_sequence_* == 1 sequences of
+    shape (1, -1, 88), which is a sequence of maximal length, will be
+    returned.
     """
     npy_files = get_files_from_path(path, ['*.npy'])
     if debug:
@@ -69,7 +70,7 @@ def train_test_data(path, len_sequence_train, debug=False):
     split = math.floor(npy_data.shape[0] * 0.7)
     data_train, data_test = npy_data[:split], npy_data[split:]
     train = HanndsDataset(data_train, len_sequence_train)
-    test = HanndsDataset(data_test, -1)
+    test = HanndsDataset(data_test, len_sequence_test)
     return train, test
 
 
@@ -130,8 +131,8 @@ class HanndsDataset(Dataset):
 def main():
     import matplotlib.pyplot as plt
 
-    convert(path='../data/hannds', ms_window=20, overwrite=True)
-    data, _ = train_test_data('../data/hannds', 100)
+    convert(path='data/', ms_window=20, overwrite=True)
+    data, _ = train_test_data('data/', 100)
 
     batchX, batchY = data[0]
     print(batchX.shape)
