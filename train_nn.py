@@ -1,174 +1,164 @@
-import datetime as dt
-import math
 import argparse
+import datetime as dt
 import os
 
+import matplotlib.pyplot as plt
 import torch
+from matplotlib.backends.backend_pdf import PdfPages
+from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
 
-from hannds_data import train_test_data, convert
+from hannds_data import train_valid_test, convert, ContinuitySampler
 
-DEBUG_MODE = True
-USE_CUDA = True
-
-DEVICE = torch.device('cuda' if torch.cuda.is_available() and USE_CUDA else 'cpu')
-print(f"Using {DEVICE}")
+DEBUG = False
 
 
 def main():
     parser = argparse.ArgumentParser(description='Learn hannds neural net')
+    parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
     parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
-    parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length')
-    parser.add_argument('--net', metavar='TYPE', type=str, required=True, help='type of the network: LSTM or RNN')
-    args = parser.parse_args()
+    parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length used in training')
+    parser.add_argument('--cuda', action='store_true', help='use CUDA')
 
-    train_dataset, validate_dataset = train_test_data('data/', args.length, args.length, debug=DEBUG_MODE)
-    model = train(args, train_dataset, validate_dataset)
+    args = parser.parse_args()
+    device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
+    print(f"Using {device}", flush=True)
+
+    convert('data/', overwrite=False)
+    train_data, valid_data, _ = train_valid_test('data/', args.length, debug=DEBUG)
+    trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, device)
+    trainer.run()
+    model = trainer.model
     if not os.path.exists('models'):
         os.mkdir('models')
-    torch.save(model, 'models/' + make_filename(args))
+    torch.save(model, 'models/' + _make_filename(args.hidden_size, args.layers))
 
 
-def make_filename(args):
-    if DEBUG_MODE:
+def _make_filename(hidden_size, layers):
+    if DEBUG:
         return "debug.pt"
     else:
-        return f"{args.net}_layers{args.layers}_len{args.length}.pt"
+        return f"hidden{hidden_size}_layers{layers}.pt"
 
 
-class FFNetwork(nn.Module):
-    def __init__(self, len_sequence):
-        super(FFNetwork, self).__init__()
-        hidden_size = 200
-        self.network = nn.Sequential(
-            nn.Linear(88 * len_sequence, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 88),
-            nn.Tanh())
-        self.len_sequence = len_sequence
+class LSTMTransformOut(nn.Module):
+    def __init__(self, hidden_size, num_layers):
+        super(LSTMTransformOut, self).__init__()
+        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=num_layers, batch_first=True,
+                            dropout=0.5)
+        self.out_linear = nn.Linear(hidden_size, 88)
 
-    def forward(self, input):
-        """
-        :param input: (batch_size, len_sequence, 88)
-        :return: (batch_size, 1, 88)
-        """
-        transformed_input = input.view(-1, self.len_sequence * 88)
-        output = self.network.forward(transformed_input)
-        transformed_output = output.view(-1, 1, 88)
-        return transformed_output
+    def forward(self, input, h_prev, c_prev):
+        lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
+        output = self.out_linear(lstm_output)
+        output = torch.tanh(output)
+        output = output * input
+        return output, h_n, c_n
 
 
-class RNN(nn.Module):
-    def __init__(self, num_layers):
-        super(RNN, self).__init__()
-        self.rnn = nn.RNN(input_size=88, hidden_size=88, num_layers=num_layers, batch_first=True)
+class Trainer(object):
+    def __init__(self, train_data, valid_data, hidden_size, layers, device):
+        self.n_epochs = 20
+        self.batch_size = 10
+        self.layers = layers
+        self.hidden_size = hidden_size
 
-    def forward(self, input):
-        """
-        :param input: (batch_size, len_sequence, 88)
-        :return: (batch_size, len_sequence, 88)
-        """
-        output, hidden = self.rnn.forward(input)
-        return output, hidden
+        sampler_train = ContinuitySampler(len(train_data), self.batch_size)
+        sampler_valid = ContinuitySampler(len(valid_data), self.batch_size)
+        self.data = {
+            'train': DataLoader(train_data, batch_size=self.batch_size, sampler=sampler_train),
+            'valid': DataLoader(valid_data, batch_size=self.batch_size, sampler=sampler_valid)
+        }
+        self.model = LSTMTransformOut(hidden_size, layers).to(device)
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
+        self.device = device
 
+        time = dt.datetime.now().strftime('%m-%d-%H%M-')
+        self.writer = SummaryWriter('runs/' + time + _make_filename(hidden_size, layers))
 
-class LSTM(nn.Module):
-    def __init__(self, num_layers):
-        super(LSTM, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=88, num_layers=num_layers, batch_first=True)
+    def initial_state(self):
+        h_0 = torch.zeros((self.layers, self.batch_size, self.hidden_size)).to(self.device)
+        c_0 = torch.zeros((self.layers, self.batch_size, self.hidden_size)).to(self.device)
+        return h_0, c_0
 
-    def forward(self, input):
-        output, hidden = self.lstm.forward(input)
-        return output, hidden
+    def run(self):
+        for epoch in range(self.n_epochs):
+            start_ts = dt.datetime.now()
+            avg_loss = {'train': 0.0, 'test': 0.0}
 
+            for phase in ['train', 'valid']:
+                h_n, c_n = self.initial_state()
+                phase_loss = (0.0, 0)
+                valid_accuracy = (0.0, 0)
+                self.model = self.model.train(phase == 'train')
 
-def train(args, train_dataset, validate_dataset):
-    n_epochs = 3
-    batch_size = 100
+                for batch_idx, (X_batch, Y_batch) in enumerate(self.data[phase]):
+                    with torch.set_grad_enabled(phase == 'train'):
+                        X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
+                        self.optimizer.zero_grad()
+                        output, h_n, c_n = self.model(X_batch, h_n, c_n)
+                        train_loss = self.criterion(output, Y_batch)
+                        if phase == 'train':
+                            train_loss.backward()
+                            self.optimizer.step()
+                        else:
+                            va1 = valid_accuracy[0] + compute_accuracy(X_batch, Y_batch, output)
+                            va2 = valid_accuracy[1] + 1
+                            valid_accuracy = (va1, va2)
 
-    # Prepare
-    time = dt.datetime.now().strftime('%m-%d-%H%M-')
-    writer = SummaryWriter('runs/' + time + make_filename(args))
-    train_data = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+                        h_n = h_n.detach()
+                        c_n = c_n.detach()
+                        phase_loss = (phase_loss[0] + train_loss, phase_loss[1] + 1)
 
-    if args.net.lower() == 'rnn':
-        model = RNN(num_layers=args.layers).to(DEVICE)
-    elif args.net.lower() == 'lstm':
-        model = LSTM(num_layers=args.layers).to(DEVICE)
-    else:
-        raise Exception('Invalid argument')
+                avg_loss[phase] = phase_loss[0] / phase_loss[1]
+                self._save_summaries(avg_loss, epoch, phase, valid_accuracy)
 
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
-    batches_per_epoch = len(train_data.dataset) // batch_size
-    scale_epoch_fractional = 10 ** math.ceil(math.log10(batches_per_epoch))
-    total_iterations = 0
+            end_ts = dt.datetime.now()
+            t_total = (end_ts - start_ts).total_seconds()
+            self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
 
-    # Train
-    for epoch in range(n_epochs):
-        start = dt.datetime.now()
-        epoch_train_loss = (0.0, 0)
-        epoch_test_loss = (0.0, 0)
-        for batch_idx, (X_batch, Y_batch) in enumerate(train_data):  # Gradient descent
-            X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
-            optimizer.zero_grad()
-            output, *_ = model(X_batch)
-            train_loss = criterion(output[:, -1], Y_batch[:, -1])
-            train_loss.backward()
-            epoch_train_loss = (epoch_train_loss[0] + train_loss, epoch_train_loss[1] + 1)
-            optimizer.step()
-            total_iterations += 1
+        plot_output(output[0])
 
-            if batch_idx % 100 == 0:
-                cur_epoch = total_iterations / batches_per_epoch
-                test_loss = compute_test_loss(model, validate_dataset, max_batches=20)
-                epoch_test_loss = (epoch_test_loss[0] + test_loss, epoch_test_loss[1] + 1)
+    def _save_summaries(self, avg_loss, epoch, phase, valid_accuracy):
+        self.writer.add_scalar('loss/' + phase, avg_loss[phase], epoch)
+        if phase == 'train':
+            for name, param in self.model.named_parameters():
+                self.writer.add_histogram(name + '/data', param.data.clone().cpu().numpy(), epoch)
+                self.writer.add_histogram(name + '/grad', param.grad.clone().cpu().numpy(), epoch)
+        else:
+            self.writer.add_scalar('accuracy', valid_accuracy[0] / valid_accuracy[1], epoch)
 
-                scaled_epoch = cur_epoch * scale_epoch_fractional
-                writer.add_scalar('loss/training', math.log(train_loss), scaled_epoch)
-                writer.add_scalar('loss/validation', math.log(test_loss), scaled_epoch)
-
-                for name, param in model.named_parameters():
-                    writer.add_histogram(name + '/data', param.data.clone().cpu().numpy(), scaled_epoch)
-                    writer.add_histogram(name + '/grad', param.grad.clone().cpu().numpy(), scaled_epoch)
-
-        end = dt.datetime.now()
-        epoch_train_loss = epoch_train_loss[0] / epoch_train_loss[1]
-        epoch_test_loss = epoch_test_loss[0] / epoch_test_loss[1]
-
-        t_total = (end - start).total_seconds()
-
-        print(f"Epoch: {epoch}({total_iterations}), duration {t_total:.1f}s, "
-              f"log train loss = {math.log(epoch_train_loss):.2f}, log test loss = {math.log(epoch_test_loss):.2f}")
-
-    return model
+    def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy):
+        print(f'Epoch: {epoch}/{self.n_epochs - 1}, {t_total:.1f}sec')
+        print('-' * 21)
+        print(f'Train loss = {avg_loss["train"]:.6f}')
+        print(f'Valid loss = {avg_loss["valid"]:.6f}')
+        print(f'Accuracy   = {valid_accuracy[0] / valid_accuracy[1]:.1f}%', flush=True)
+        print()
+        print()
 
 
-def compute_test_loss(model, validate_dataset, max_batches=-1):
-    """
-    computes test loss. If max_batches == -1 it will compute the loss
-    over the entire data set.
-    """
-    validate_data = DataLoader(validate_dataset, batch_size=100, shuffle=True)
-    with torch.no_grad():  # Compute test error
-        total_loss = 0.0
-        n = 0
-        for X_batch, Y_batch in validate_data:
-            if n == max_batches:
-                break
-            X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
-            output, *_ = model(X_batch)
-            criterion = nn.MSELoss()
-            test_loss = criterion(output[:, -1], Y_batch[:, -1])
-            total_loss += test_loss
-            n += 1
+def compute_accuracy(X, Y, prediction):
+    num_notes = torch.sum(X)
+    left_hand = (prediction < 0.0).float()
+    right_hand = (prediction > 0.0).float()
+    prediction = left_hand * -1.0 + right_hand * 1.0
+    diff = (prediction != Y).float()
+    errors_percent = torch.sum(diff) / num_notes * 100.0
+    return 100.0 - errors_percent
 
-        total_loss /= n
-        return total_loss
+
+def plot_output(output, max_pages=1):
+    with PdfPages('results.pdf') as pdf:
+        for i in reversed(range(max_pages)):
+            if (i + 1) * 100 <= output.shape[0]:
+                fig, ax = plt.subplots()
+                ax.imshow(output[i * 100: (i + 1) * 100], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+                pdf.savefig(fig)
+                plt.close()
 
 
 if __name__ == '__main__':
-    convert('data/', overwrite=False)
     main()

@@ -3,19 +3,14 @@
 source activate pytorch
 python --version
 
-# length=( 10 20 40 60 100 150 200)
-length=(40 60 100 150 200)
-# layers=( 1 2 3 5 )
-layers=( 2 3 5 )
-for i in ${layers[@]}
+layers=( 2 3 )
+hidden=( 2 5 10 20 50 70 100 )
+for i in ${hidden[@]}
 do
-    for j in ${length[@]}
+    for j in ${layers[@]}
     do
-	    # echo "python train_nn.py --net RNN --layers $i --length $j"
-	    # python train_nn.py --net RNN --layers $i --length $j
-	    # echo ""
-	    echo "python train_nn.py --net LSTM --layers $i --length $j"
-	    python train_nn.py --net LSTM --layers $i --length $j
+	    echo "train_nn.py --hidden_size $i --layers $j --length 100 --cuda"
+	    python train_nn.py --hidden_size $i --layers $j --length 100 --cuda
 	done
 done
 
