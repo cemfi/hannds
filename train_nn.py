@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
     parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
     parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length used in training')
-    parser.add_argument('--cuda', action='store_true', help='use CUDA')
+    parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
 
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
