@@ -60,7 +60,7 @@ def train_valid_test(path, len_sequence, debug=False):
     """
     returns training and test data. If len_sequence == 1 sequences of
     shape (1, -1, 88), which is a sequence of maximal length, will be
-    returned. This is always the shape of the test data.
+    returned. This is always the shape of the valid and test data.
     """
     npy_files = get_files_from_path(path, ['*.npy'])
     if debug:
@@ -72,7 +72,7 @@ def train_valid_test(path, len_sequence, debug=False):
     split_2 = math.floor(npy_data.shape[0] * 0.9)
     train_npy, valid_npy, test_npy = npy_data[:split_1], npy_data[split_1: split_2], npy_data[split_2:]
     train_data = HanndsDataset(train_npy, len_sequence)
-    valid_data = HanndsDataset(valid_npy, len_sequence)
+    valid_data = HanndsDataset(valid_npy, -1)
     test_data = HanndsDataset(test_npy, -1)
 
     return train_data, valid_data, test_data

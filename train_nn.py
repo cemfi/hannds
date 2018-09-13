@@ -1,5 +1,6 @@
 import argparse
 import datetime as dt
+import math
 import os
 
 import matplotlib.pyplot as plt
@@ -11,43 +12,50 @@ from torch.utils.data import DataLoader
 
 from hannds_data import train_valid_test, convert, ContinuitySampler
 
-DEBUG = False
-
+_debug = None
 
 def main():
+    global _debug
+
     parser = argparse.ArgumentParser(description='Learn hannds neural net')
     parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
     parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
     parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length used in training')
     parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
+    parser.add_argument('--bidirectional', action='store_true', required=False, help='use a bi-directional LSTM')
+    parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
 
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
     print(f"Using {device}", flush=True)
+    _debug = args.debug
 
     convert('data/', overwrite=False)
-    train_data, valid_data, _ = train_valid_test('data/', args.length, debug=DEBUG)
-    trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, device)
+    train_data, valid_data, _ = train_valid_test('data/', args.length, debug=args.debug)
+    trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, args.bidirectional, device)
     trainer.run()
     model = trainer.model
     if not os.path.exists('models'):
         os.mkdir('models')
-    torch.save(model, 'models/' + _make_filename(args.hidden_size, args.layers))
+    torch.save(model, 'models/' + _make_filename(args.hidden_size, args.layers, args.bidirectional))
 
 
-def _make_filename(hidden_size, layers):
-    if DEBUG:
+def _make_filename(hidden_size, layers, bidirectional):
+    if _debug:
         return "debug.pt"
     else:
-        return f"hidden{hidden_size}_layers{layers}.pt"
+        bi_str = '-bidirectional' if bidirectional else ''
+        return f"hidden{hidden_size}_layers{layers}{bi_str}.pt"
 
 
 class LSTMTransformOut(nn.Module):
-    def __init__(self, hidden_size, num_layers):
+    def __init__(self, hidden_size, n_layers, bidirectional):
         super(LSTMTransformOut, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=num_layers, batch_first=True,
-                            dropout=0.5)
-        self.out_linear = nn.Linear(hidden_size, 88)
+        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
+                            dropout=0.5, bidirectional=bidirectional)
+        self.n_directions = 2 if bidirectional else 1
+        self.out_linear = nn.Linear(hidden_size * self.n_directions, 88)
+        self.n_layers = n_layers
 
     def forward(self, input, h_prev, c_prev):
         lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
@@ -58,29 +66,34 @@ class LSTMTransformOut(nn.Module):
 
 
 class Trainer(object):
-    def __init__(self, train_data, valid_data, hidden_size, layers, device):
-        self.n_epochs = 20
-        self.batch_size = 10
+    def __init__(self, train_data, valid_data, hidden_size, layers, bidirectional, device):
+        self.n_epochs = 30
+        self.batch_size_train = 10
         self.layers = layers
         self.hidden_size = hidden_size
+        self.bidirectional = bidirectional
 
-        sampler_train = ContinuitySampler(len(train_data), self.batch_size)
-        sampler_valid = ContinuitySampler(len(valid_data), self.batch_size)
+        sampler_train = ContinuitySampler(len(train_data), self.batch_size_train)
         self.data = {
-            'train': DataLoader(train_data, batch_size=self.batch_size, sampler=sampler_train),
-            'valid': DataLoader(valid_data, batch_size=self.batch_size, sampler=sampler_valid)
+            'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
+            'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
         }
-        self.model = LSTMTransformOut(hidden_size, layers).to(device)
+        self.model = LSTMTransformOut(hidden_size, layers, bidirectional).to(device)
         self.criterion = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         self.device = device
 
         time = dt.datetime.now().strftime('%m-%d-%H%M-')
-        self.writer = SummaryWriter('runs/' + time + _make_filename(hidden_size, layers))
+        self.writer = SummaryWriter('runs/' + time + _make_filename(hidden_size, layers, bidirectional))
 
-    def initial_state(self):
-        h_0 = torch.zeros((self.layers, self.batch_size, self.hidden_size)).to(self.device)
-        c_0 = torch.zeros((self.layers, self.batch_size, self.hidden_size)).to(self.device)
+    def zero_state(self, phase):
+        n_directions = self.model.n_directions
+        if phase == 'train':
+            h_0 = torch.zeros((self.layers * n_directions, self.batch_size_train, self.hidden_size)).to(self.device)
+            c_0 = torch.zeros((self.layers * n_directions, self.batch_size_train, self.hidden_size)).to(self.device)
+        else:
+            h_0 = torch.zeros((self.layers * n_directions, 1, self.hidden_size)).to(self.device)
+            c_0 = torch.zeros((self.layers * n_directions, 1, self.hidden_size)).to(self.device)
         return h_0, c_0
 
     def run(self):
@@ -89,7 +102,7 @@ class Trainer(object):
             avg_loss = {'train': 0.0, 'test': 0.0}
 
             for phase in ['train', 'valid']:
-                h_n, c_n = self.initial_state()
+                h_n, c_n = self.zero_state(phase)
                 phase_loss = (0.0, 0)
                 valid_accuracy = (0.0, 0)
                 self.model = self.model.train(phase == 'train')
@@ -110,6 +123,9 @@ class Trainer(object):
 
                         h_n = h_n.detach()
                         c_n = c_n.detach()
+                        if self.bidirectional:
+                            h_n[1::2] = 0  # ignore backward state as we are stepping forward from batch to batch
+                            c_n[1::2] = 0
                         phase_loss = (phase_loss[0] + train_loss, phase_loss[1] + 1)
 
                 avg_loss[phase] = phase_loss[0] / phase_loss[1]
