@@ -52,7 +52,7 @@ def _make_filename(hidden_size, layers, bidirectional):
 class Network(nn.Module):
     def __init__(self, hidden_size, n_layers, bidirectional):
         super(Network, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, n_layers=n_layers, batch_first=True,
+        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
                             dropout=0.5, bidirectional=bidirectional)
         self.n_directions = 2 if bidirectional else 1
         self.out_linear = nn.Linear(hidden_size * self.n_directions, 88 * 3)
@@ -67,7 +67,7 @@ class Network(nn.Module):
 
 class Trainer(object):
     def __init__(self, train_data, valid_data, hidden_size, layers, bidirectional, device):
-        self.n_epochs = 30
+        self.n_epochs = 50
         self.batch_size_train = 10
         self.layers = layers
         self.hidden_size = hidden_size
