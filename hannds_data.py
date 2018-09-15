@@ -102,22 +102,10 @@ class HanndsDataset(Dataset):
             data[:, 1, :]
         )
 
-        # Mark if both hands are played simultaneously
-        both = np.logical_and(
-            data[:, 0, :],
-            data[:, 1, :]
-        )
-
-        # Return last played window of every sample:
-        #    -1 => left hand
-        #    +1 => right hand
-        #     0 => both hands / hands
-        no_hand_value = 0.0  # nan if you want to distinguish both hands / no hand
-        Y = np.full((batch_size, 88), no_hand_value)
-        Y[data[:, 0, :]] = +1
-        Y[data[:, 1, :]] = -1
-        Y[both] = 0
-        return X.astype(np.float32), Y.astype(np.float32)
+        Y = np.ones((batch_size, 88))
+        Y[data[:, 0, :]] = 0
+        Y[data[:, 1, :]] = 2
+        return X.astype(np.float32), Y.astype(np.longlong)
 
     def __len__(self):
         if self.len_sequence == -1:
@@ -177,11 +165,11 @@ def main():
     loader = DataLoader(data, batch_size, sampler=continuity)
 
     for idx, (X_batch, Y_batch) in enumerate(loader):
-        X = X_batch[10]
-        Y = Y_batch[10]
+        X = X_batch[8]
+        Y = Y_batch[8]
         img = np.full((X.shape[0] + 2, X.shape[1]), -0.2)
         img[:-2] = X
-        img[-1] = Y[-1]
+        img[-1] = Y[-1, :] - 1.0
 
         plt.imshow(img, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         plt.show()

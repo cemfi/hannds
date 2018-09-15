@@ -14,6 +14,7 @@ from hannds_data import train_valid_test, convert, ContinuitySampler
 
 _debug = None
 
+
 def main():
     global _debug
 
@@ -48,20 +49,19 @@ def _make_filename(hidden_size, layers, bidirectional):
         return f"hidden{hidden_size}_layers{layers}{bi_str}.pt"
 
 
-class LSTMTransformOut(nn.Module):
+class Network(nn.Module):
     def __init__(self, hidden_size, n_layers, bidirectional):
-        super(LSTMTransformOut, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
+        super(Network, self).__init__()
+        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, n_layers=n_layers, batch_first=True,
                             dropout=0.5, bidirectional=bidirectional)
         self.n_directions = 2 if bidirectional else 1
-        self.out_linear = nn.Linear(hidden_size * self.n_directions, 88)
+        self.out_linear = nn.Linear(hidden_size * self.n_directions, 88 * 3)
         self.n_layers = n_layers
 
     def forward(self, input, h_prev, c_prev):
         lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
         output = self.out_linear(lstm_output)
-        output = torch.tanh(output)
-        output = output * input
+        output = output.view(-1, output.shape[1], 88, 3)
         return output, h_n, c_n
 
 
@@ -78,8 +78,8 @@ class Trainer(object):
             'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
             'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
         }
-        self.model = LSTMTransformOut(hidden_size, layers, bidirectional).to(device)
-        self.criterion = nn.MSELoss()
+        self.model = Network(hidden_size, layers, bidirectional).to(device)
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         self.device = device
 
@@ -112,12 +112,13 @@ class Trainer(object):
                         X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
                         self.optimizer.zero_grad()
                         output, h_n, c_n = self.model(X_batch, h_n, c_n)
-                        train_loss = self.criterion(output, Y_batch)
+                        train_loss = self.criterion(output.view((-1, 3)), Y_batch.view(-1))
                         if phase == 'train':
                             train_loss.backward()
                             self.optimizer.step()
                         else:
-                            va1 = valid_accuracy[0] + compute_accuracy(X_batch, Y_batch, output)
+                            predicted_classes = torch.argmax(output, dim=3)
+                            va1 = valid_accuracy[0] + compute_accuracy(X_batch, Y_batch, predicted_classes)
                             va2 = valid_accuracy[1] + 1
                             valid_accuracy = (va1, va2)
 
@@ -156,14 +157,19 @@ class Trainer(object):
         print()
 
 
-def compute_accuracy(X, Y, prediction):
-    num_notes = torch.sum(X)
-    left_hand = (prediction < 0.0).float()
-    right_hand = (prediction > 0.0).float()
-    prediction = left_hand * -1.0 + right_hand * 1.0
-    diff = (prediction != Y).float()
-    errors_percent = torch.sum(diff) / num_notes * 100.0
-    return 100.0 - errors_percent
+def compute_accuracy(X, Y, predicted_classes):
+    n_notes = X.sum()
+    pred_lh = predicted_classes == 0
+    pred_rh = predicted_classes == 2
+    label_lh = Y == 0
+    label_rh = Y == 2
+    n_lh_correct = (pred_lh * label_lh).sum().float()
+    n_rh_correct = (pred_rh * label_rh).sum().float()
+    assert n_lh_correct <= n_notes
+    assert n_rh_correct <= n_notes
+    n_correct = n_lh_correct + n_rh_correct
+    assert n_correct <= n_notes
+    return n_correct.float() / n_notes.float() * 100.0
 
 
 def plot_output(output, max_pages=1):
