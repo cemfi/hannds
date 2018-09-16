@@ -80,6 +80,8 @@ def train_valid_test(path, len_sequence, debug=False):
 
 XY = namedtuple('XY', ['X', 'Y'])
 
+LEFT_HAND_LABEL = 1
+RIGHT_HAND_LABEL = 2
 
 class HanndsDataset(Dataset):
     """
@@ -102,9 +104,9 @@ class HanndsDataset(Dataset):
             data[:, 1, :]
         )
 
-        Y = np.ones((batch_size, 88))
-        Y[data[:, 0, :]] = 0
-        Y[data[:, 1, :]] = 2
+        Y = np.zeros((batch_size, 88))
+        Y[data[:, 0, :]] = LEFT_HAND_LABEL
+        Y[data[:, 1, :]] = RIGHT_HAND_LABEL
         return X.astype(np.float32), Y.astype(np.longlong)
 
     def __len__(self):

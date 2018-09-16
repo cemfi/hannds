@@ -1,6 +1,5 @@
 import argparse
 import datetime as dt
-import math
 import os
 
 import matplotlib.pyplot as plt
@@ -11,6 +10,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from hannds_data import train_valid_test, convert, ContinuitySampler
+import hannds_data
 
 _debug = None
 
@@ -62,6 +62,10 @@ class Network(nn.Module):
         lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
         output = self.out_linear(lstm_output)
         output = output.view(-1, output.shape[1], 88, 3)
+        # Residual connection
+        # output[:, :, :, 0] += 1.0 - input
+        # output[:, :, :, 1] += input
+        # output[:, :, :, 2] += input
         return output, h_n, c_n
 
 
@@ -159,10 +163,10 @@ class Trainer(object):
 
 def compute_accuracy(X, Y, predicted_classes):
     n_notes = X.sum()
-    pred_lh = predicted_classes == 0
-    pred_rh = predicted_classes == 2
-    label_lh = Y == 0
-    label_rh = Y == 2
+    pred_lh = predicted_classes == hannds_data.LEFT_HAND_LABEL
+    pred_rh = predicted_classes == hannds_data.RIGHT_HAND_LABEL
+    label_lh = Y == hannds_data.LEFT_HAND_LABEL
+    label_rh = Y == hannds_data.RIGHT_HAND_LABEL
     n_lh_correct = (pred_lh * label_lh).sum().float()
     n_rh_correct = (pred_rh * label_rh).sum().float()
     assert n_lh_correct <= n_notes
@@ -172,7 +176,7 @@ def compute_accuracy(X, Y, predicted_classes):
     return n_correct.float() / n_notes.float() * 100.0
 
 
-def plot_output(output, max_pages=1):
+def plot_output(output, max_pages=32):
     with PdfPages('results.pdf') as pdf:
         for i in reversed(range(max_pages)):
             if (i + 1) * 100 <= output.shape[0]:
