@@ -22,7 +22,7 @@ def get_files_from_path(path, extensions):
 
         if len(files) == 0:
             raise FileNotFoundError('No files found with correct extensions ' + str(extensions))
-    return files
+    return sorted(files)
 
 
 def convert(path, ms_window=20, overwrite=True):
