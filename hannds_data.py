@@ -14,36 +14,37 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class AllData(object):
-    def __init__(self, len_train_sequence, debug=False):
+    def __init__(self, debug=False):
         self._convert('data/', overwrite=False)
-        self.all_files = self._get_files_from_path('data/', ['*.npy'])
+        self.train_files = self.valid_files = self.test_files = None
+        self.debug = debug
+
+    def initialize_from_dir(self, len_train_sequence):
+        all_files = self._get_files_from_path('data/', ['*.npy'])
         r = random.Random(42)  # seed is arbitrary
-        r.shuffle(self.all_files)
-        n_valid_test = math.ceil(len(self.all_files) * 0.15)
-        n_train = len(self.all_files) - n_valid_test * 2
-        self.range_train = (0, n_train)
-        self.range_valid = (self.range_train[1], self.range_train[1] + n_valid_test)
-        self.range_test = (self.range_valid[1], self.range_valid[1] + n_valid_test)
-        assert self.range_test[1] == len(self.all_files)
+        r.shuffle(all_files)
+        n_valid_test = math.ceil(len(all_files) * 0.15)
+        n_train = len(all_files) - n_valid_test * 2
+        range_train = (0, n_train)
+        range_valid = (range_train[1], range_train[1] + n_valid_test)
+        range_test = (range_valid[1], range_valid[1] + n_valid_test)
+        assert range_test[1] == len(all_files)
 
-        self.train_data = self._dataset_for_files(self.train_files, len_train_sequence, debug=debug)
-        self.valid_data = self._dataset_for_files(self.valid_files, len_sequence=-1, debug=debug)
-        self.test_data = self._dataset_for_files(self.test_files, len_sequence=-1, debug=debug)
+        self.train_files = all_files[range_train[0]: range_train[1]]
+        self.valid_files = all_files[range_valid[0]: range_valid[1]]
+        self.test_files = all_files[range_test[0]: range_test[1]]
+        self._make_datasets(len_train_sequence)
 
-    @property
-    def train_files(self):
-        begin, end = self.range_train
-        return self.all_files[begin : end]
+    def initialize_from_lists(self, train_files, valid_files, test_files, len_train_sequence):
+        self.train_files = train_files.copy()
+        self.valid_files = valid_files.copy()
+        self.test_files = test_files.copy()
+        self._make_datasets(len_train_sequence)
 
-    @property
-    def valid_files(self):
-        begin, end = self.range_valid
-        return self.all_files[begin : end]
-
-    @property
-    def test_files(self):
-        begin, end = self.range_test
-        return self.all_files[begin : end]
+    def _make_datasets(self, len_train_sequence):
+        self.train_data = self._dataset_for_files(self.train_files, len_train_sequence, debug=self.debug)
+        self.valid_data = self._dataset_for_files(self.valid_files, len_sequence=-1, debug=self.debug)
+        self.test_data = self._dataset_for_files(self.test_files, len_sequence=-1, debug=self.debug)
 
     def _get_files_from_path(self, path, extensions):
         if os.path.isfile(path):  # Load single file

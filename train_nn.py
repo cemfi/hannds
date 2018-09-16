@@ -35,7 +35,8 @@ def main():
     print(f"Using {device}", flush=True)
     g_debug = args.debug
 
-    data = hannds_data.AllData(args.length, debug=args.debug)
+    data = hannds_data.AllData(debug=args.debug)
+    data.initialize_from_dir(args.length)
     train_data = data.train_data
     valid_data = data.valid_data
     trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, args.bidirectional, device)
@@ -45,7 +46,7 @@ def main():
         os.mkdir('models')
 
     os.mkdir('models/' + g_time)
-    torch.save(model, f'models/{g_time}/' + _make_filename(args.hidden_size, args.layers, args.bidirectional))
+    torch.save(model, f'models/{g_time}/model.pt')
     desc = {
         'args': vars(args),
         'train': data.train_files,
@@ -54,14 +55,6 @@ def main():
     }
     with open(f'models/{g_time}/desc.json', 'w') as file:
         json.dump(desc, file, indent=4)
-
-
-def _make_filename(hidden_size, layers, bidirectional):
-    if g_debug:
-        return "debug.pt"
-    else:
-        bi_str = '-bidirectional' if bidirectional else ''
-        return f"hidden{hidden_size}_layers{layers}{bi_str}.pt"
 
 
 class Network(nn.Module):
@@ -73,8 +66,9 @@ class Network(nn.Module):
         self.out_linear = nn.Linear(hidden_size * self.n_directions, 88 * 3)
         self.n_layers = n_layers
 
-    def forward(self, input, h_prev, c_prev):
-        lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
+    def forward(self, input, h_prev=None, c_prev=None):
+        hidden_in = (h_prev, c_prev) if h_prev is not None else None
+        lstm_output, (h_n, c_n) = self.lstm.forward(input, hidden_in)
         output = self.out_linear(lstm_output)
         output = output.view(-1, output.shape[1], 88, 3)
         # Residual connection
@@ -102,7 +96,9 @@ class Trainer(object):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         self.device = device
 
-        self.writer = SummaryWriter('runs/' + g_time + '-' + _make_filename(hidden_size, layers, bidirectional))
+        bi_str = '-bidirectional' if bidirectional else ''
+        desc = f"hidden{hidden_size}_layers{layers}{bi_str}"
+        self.writer = SummaryWriter('runs/' + g_time + '-' + desc)
 
     def zero_state(self, phase):
         n_directions = self.model.n_directions
@@ -115,7 +111,7 @@ class Trainer(object):
         return h_0, c_0
 
     def run(self):
-        best_accuracy = np.inf
+        best_accuracy = 0.0
         final_model = None
 
         for epoch in range(self.n_epochs):
@@ -156,7 +152,8 @@ class Trainer(object):
             end_ts = dt.datetime.now()
             t_total = (end_ts - start_ts).total_seconds()
             self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
-            if valid_accuracy[0] / valid_accuracy[1] < best_accuracy:
+            if valid_accuracy[0] / valid_accuracy[1] > best_accuracy:
+                print('better')
                 best_accuracy = valid_accuracy[0] / valid_accuracy[1]
                 final_model = copy.deepcopy(self.model)
 
