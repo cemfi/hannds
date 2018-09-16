@@ -1,5 +1,7 @@
 import argparse
+import copy
 import datetime as dt
+import json
 import os
 
 import matplotlib.pyplot as plt
@@ -8,15 +10,17 @@ from matplotlib.backends.backend_pdf import PdfPages
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
+import numpy as np
 
-from hannds_data import train_valid_test, convert, ContinuitySampler
 import hannds_data
 
-_debug = None
+# global vars
+g_debug = None
+g_time = dt.datetime.now().strftime('%m-%d-%H%M-%S')
 
 
 def main():
-    global _debug
+    global g_debug
 
     parser = argparse.ArgumentParser(description='Learn hannds neural net')
     parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
@@ -29,20 +33,31 @@ def main():
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
     print(f"Using {device}", flush=True)
-    _debug = args.debug
+    g_debug = args.debug
 
-    convert('data/', overwrite=False)
-    train_data, valid_data, _ = train_valid_test('data/', args.length, debug=args.debug)
+    data = hannds_data.AllData(args.length, debug=args.debug)
+    train_data = data.train_data
+    valid_data = data.valid_data
     trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, args.bidirectional, device)
     trainer.run()
     model = trainer.model
     if not os.path.exists('models'):
         os.mkdir('models')
-    torch.save(model, 'models/' + _make_filename(args.hidden_size, args.layers, args.bidirectional))
+
+    os.mkdir('models/' + g_time)
+    torch.save(model, f'models/{g_time}/' + _make_filename(args.hidden_size, args.layers, args.bidirectional))
+    desc = {
+        'args': vars(args),
+        'train': data.train_files,
+        'valid': data.valid_files,
+        'test': data.test_files
+    }
+    with open(f'models/{g_time}/desc.json', 'w') as file:
+        json.dump(desc, file, indent=4)
 
 
 def _make_filename(hidden_size, layers, bidirectional):
-    if _debug:
+    if g_debug:
         return "debug.pt"
     else:
         bi_str = '-bidirectional' if bidirectional else ''
@@ -77,7 +92,7 @@ class Trainer(object):
         self.hidden_size = hidden_size
         self.bidirectional = bidirectional
 
-        sampler_train = ContinuitySampler(len(train_data), self.batch_size_train)
+        sampler_train = hannds_data.ContinuationSampler(len(train_data), self.batch_size_train)
         self.data = {
             'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
             'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
@@ -87,8 +102,7 @@ class Trainer(object):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         self.device = device
 
-        time = dt.datetime.now().strftime('%m-%d-%H%M-')
-        self.writer = SummaryWriter('runs/' + time + _make_filename(hidden_size, layers, bidirectional))
+        self.writer = SummaryWriter('runs/' + g_time + '-' + _make_filename(hidden_size, layers, bidirectional))
 
     def zero_state(self, phase):
         n_directions = self.model.n_directions
@@ -101,6 +115,9 @@ class Trainer(object):
         return h_0, c_0
 
     def run(self):
+        best_accuracy = np.inf
+        final_model = None
+
         for epoch in range(self.n_epochs):
             start_ts = dt.datetime.now()
             avg_loss = {'train': 0.0, 'test': 0.0}
@@ -139,8 +156,12 @@ class Trainer(object):
             end_ts = dt.datetime.now()
             t_total = (end_ts - start_ts).total_seconds()
             self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
+            if valid_accuracy[0] / valid_accuracy[1] < best_accuracy:
+                best_accuracy = valid_accuracy[0] / valid_accuracy[1]
+                final_model = copy.deepcopy(self.model)
 
-        plot_output(output[0])
+        self.model = final_model
+        plot_output(torch.softmax(output[0], dim=-1))
 
     def _save_summaries(self, avg_loss, epoch, phase, valid_accuracy):
         self.writer.add_scalar('loss/' + phase, avg_loss[phase], epoch)
@@ -180,8 +201,10 @@ def plot_output(output, max_pages=32):
     with PdfPages('results.pdf') as pdf:
         for i in reversed(range(max_pages)):
             if (i + 1) * 100 <= output.shape[0]:
+                region = output[i * 100: (i + 1) * 100]
+                image = region[:, :, 1] * -1.0 + region[:, :, 2] * 1.0
                 fig, ax = plt.subplots()
-                ax.imshow(output[i * 100: (i + 1) * 100], cmap='bwr', origin='lower', vmin=-1, vmax=1)
+                ax.imshow(image, cmap='bwr', origin='lower', vmin=-1, vmax=1)
                 pdf.savefig(fig)
                 plt.close()
 

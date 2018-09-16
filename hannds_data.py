@@ -2,6 +2,7 @@ import glob
 import logging
 import math
 import os
+import random
 from collections import namedtuple
 
 import numpy as np
@@ -12,76 +13,95 @@ from torch.utils.data.sampler import Sampler
 logging.basicConfig(level=logging.DEBUG)
 
 
-def get_files_from_path(path, extensions):
-    if os.path.isfile(path):  # Load single file
-        files = [path]
-    else:  # Get list of all files with correct extensions in path
-        files = []
-        for file_type in extensions:
-            files.extend(glob.glob(os.path.join(path, file_type)))
+class AllData(object):
+    def __init__(self, len_train_sequence, debug=False):
+        self._convert('data/', overwrite=False)
+        self.all_files = self._get_files_from_path('data/', ['*.npy'])
+        r = random.Random(42)  # seed is arbitrary
+        r.shuffle(self.all_files)
+        n_valid_test = math.ceil(len(self.all_files) * 0.15)
+        n_train = len(self.all_files) - n_valid_test * 2
+        self.range_train = (0, n_train)
+        self.range_valid = (self.range_train[1], self.range_train[1] + n_valid_test)
+        self.range_test = (self.range_valid[1], self.range_valid[1] + n_valid_test)
+        assert self.range_test[1] == len(self.all_files)
 
-        if len(files) == 0:
-            raise FileNotFoundError('No files found with correct extensions ' + str(extensions))
-    return sorted(files)
+        self.train_data = self._dataset_for_files(self.train_files, len_train_sequence, debug=debug)
+        self.valid_data = self._dataset_for_files(self.valid_files, len_sequence=-1, debug=debug)
+        self.test_data = self._dataset_for_files(self.test_files, len_sequence=-1, debug=debug)
 
+    @property
+    def train_files(self):
+        begin, end = self.range_train
+        return self.all_files[begin : end]
 
-def convert(path, ms_window=20, overwrite=True):
-    midi_files = get_files_from_path(path, ['*.mid', '*.midi'])
+    @property
+    def valid_files(self):
+        begin, end = self.range_valid
+        return self.all_files[begin : end]
 
-    samples_per_sec = 1000 // ms_window
-    for midi_file in midi_files:
-        npy_file = midi_file + '_' + str(ms_window) + 'ms' + '.npy'
+    @property
+    def test_files(self):
+        begin, end = self.range_test
+        return self.all_files[begin : end]
 
-        if overwrite or not os.path.exists(npy_file):
-            midi = pretty_midi.PrettyMIDI(midi_file)
-            logging.debug("Converting file '" + midi_file + "'")
-            midi_data = midi.instruments[0], midi.instruments[1]
+    def _get_files_from_path(self, path, extensions):
+        if os.path.isfile(path):  # Load single file
+            files = [path]
+        else:  # Get list of all files with correct extensions in path
+            files = []
+            for file_type in extensions:
+                files.extend(glob.glob(os.path.join(path, file_type)))
 
-            # Generate empty numpy arrays
-            n_windows = math.ceil(midi.get_end_time() * samples_per_sec)
-            hands = np.zeros((
-                n_windows,  # Number of windows to calculate
-                2,  # Left and right hand = 2 hands
-                88  # 88 keys on a piano
-            ), dtype=np.bool)
+            if len(files) == 0:
+                raise FileNotFoundError('No files found with correct extensions ' + str(extensions))
+        return sorted(files)
 
-            # Fill array with data
-            for hand, midi_hand in enumerate(midi_data):
-                for note in midi_hand.notes:
-                    start = int(math.floor(note.start * samples_per_sec))
-                    end = int(math.ceil(note.end * samples_per_sec))
-                    hands[start:end, hand, note.pitch - 21] = True
+    def _convert(self, path, ms_window=20, overwrite=True):
+        midi_files = self._get_files_from_path(path, ['*.mid', '*.midi'])
 
-            # Save array to disk
-            np.save(npy_file, hands)
+        samples_per_sec = 1000 // ms_window
+        for midi_file in midi_files:
+            npy_file = midi_file + '_' + str(ms_window) + 'ms' + '.npy'
 
+            if overwrite or not os.path.exists(npy_file):
+                midi = pretty_midi.PrettyMIDI(midi_file)
+                logging.debug("Converting file '" + midi_file + "'")
+                midi_data = midi.instruments[0], midi.instruments[1]
 
-def train_valid_test(path, len_sequence, debug=False):
-    """
-    returns training and test data. If len_sequence == 1 sequences of
-    shape (1, -1, 88), which is a sequence of maximal length, will be
-    returned. This is always the shape of the valid and test data.
-    """
-    npy_files = get_files_from_path(path, ['*.npy'])
-    if debug:
-        npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files[:2]], axis=0)
-    else:
-        npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0)
+                # Generate empty numpy arrays
+                n_windows = math.ceil(midi.get_end_time() * samples_per_sec)
+                hands = np.zeros((
+                    n_windows,  # Number of windows to calculate
+                    2,  # Left and right hand = 2 hands
+                    88  # 88 keys on a piano
+                ), dtype=np.bool)
 
-    split_1 = math.floor(npy_data.shape[0] * 0.7)
-    split_2 = math.floor(npy_data.shape[0] * 0.9)
-    train_npy, valid_npy, test_npy = npy_data[:split_1], npy_data[split_1: split_2], npy_data[split_2:]
-    train_data = HanndsDataset(train_npy, len_sequence)
-    valid_data = HanndsDataset(valid_npy, -1)
-    test_data = HanndsDataset(test_npy, -1)
+                # Fill array with data
+                for hand, midi_hand in enumerate(midi_data):
+                    for note in midi_hand.notes:
+                        start = int(math.floor(note.start * samples_per_sec))
+                        end = int(math.ceil(note.end * samples_per_sec))
+                        hands[start:end, hand, note.pitch - 21] = True
 
-    return train_data, valid_data, test_data
+                # Save array to disk
+                np.save(npy_file, hands)
+
+    def _dataset_for_files(self, npy_files, len_sequence, debug=False):
+        if debug:
+            npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files[:2]], axis=0)
+        else:
+            npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0)
+
+        data_set = HanndsDataset(npy_data, len_sequence)
+        return data_set
 
 
 XY = namedtuple('XY', ['X', 'Y'])
 
 LEFT_HAND_LABEL = 1
 RIGHT_HAND_LABEL = 2
+
 
 class HanndsDataset(Dataset):
     """
@@ -127,7 +147,7 @@ class HanndsDataset(Dataset):
             return res1, res2
 
 
-class ContinuitySampler(Sampler):
+class ContinuationSampler(Sampler):
 
     def __init__(self, len_dataset, batch_size):
         Sampler.__init__(self, None)
@@ -153,18 +173,19 @@ class ContinuitySampler(Sampler):
 
 
 def main():
-    convert('data/', overwrite=False)
+    data = AllData(len_train_sequence=100, debug=True)
+    data._convert('data/', overwrite=False)
 
     import matplotlib.pyplot as plt
 
-    data, _, _ = train_valid_test('data/', len_sequence=100, debug=True)
-    batchX, batchY = data[0]
+    train_data = data.train_data
+    batchX, batchY = train_data[0]
     print(batchX.shape)
     print(batchY.shape)
 
     batch_size = 20
-    continuity = ContinuitySampler(len(data), batch_size)
-    loader = DataLoader(data, batch_size, sampler=continuity)
+    continuity = ContinuationSampler(len(train_data), batch_size)
+    loader = DataLoader(train_data, batch_size, sampler=continuity)
 
     for idx, (X_batch, Y_batch) in enumerate(loader):
         X = X_batch[8]
