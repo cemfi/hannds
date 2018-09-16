@@ -5,7 +5,6 @@ channels:
 
 dependencies:
   - python=3.6
-  - tensorboard
   - matplotlib
   - pytorch
   - cudatoolkit
@@ -14,3 +13,4 @@ dependencies:
     - mido
     - git+https://github.com/craffel/pretty-midi.git
     - tensorboardx
+    - python-osc
