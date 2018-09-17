@@ -1,4 +1,5 @@
-from kalman_mapper import *
+from kalman_mapper import MidiEvent, KalmanMapper, HandConstraints
+import kalman_mapper
 
 
 def test_constraints():
@@ -32,3 +33,7 @@ def test_kalman_mapper():
     event = MidiEvent(30, is_note_on=True, when=1.0, is_left=True)
     mapper.midi_event(event)
     assert mapper.last_was_left_hand == event.is_left
+
+
+def test_kalman_main():
+    kalman_mapper.main()

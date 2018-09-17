@@ -6,6 +6,8 @@ from mido.midifiles.tracks import _to_abstime
 
 import hannds_data
 
+g_package_directory = os.path.dirname(os.path.abspath(__file__))
+
 
 # Data
 
@@ -164,8 +166,10 @@ class KalmanMapper(object):
                 delta = event.when - self.time_last_lh
                 self.left_hand_variance += delta * variance_per_second
 
-            self.left_hand_pos += self.left_hand_variance / (self.left_hand_variance + midi_variance) * (event.pitch - self.left_hand_pos)
-            self.left_hand_variance -= self.left_hand_variance / (self.left_hand_variance + midi_variance) * self.left_hand_variance
+            self.left_hand_pos += self.left_hand_variance / (self.left_hand_variance + midi_variance) * (
+                        event.pitch - self.left_hand_pos)
+            self.left_hand_variance -= self.left_hand_variance / (
+                        self.left_hand_variance + midi_variance) * self.left_hand_variance
             self.time_last_lh = event.when
             self.last_was_left_hand = True
 
@@ -174,8 +178,10 @@ class KalmanMapper(object):
                 delta = event.when - self.time_last_rh
                 self.right_hand_variance += delta * variance_per_second
 
-            self.right_hand_pos += self.right_hand_variance / (self.right_hand_variance + midi_variance) * (event.pitch - self.right_hand_pos)
-            self.right_hand_variance -= self.right_hand_variance / (self.right_hand_variance + midi_variance) * self.right_hand_variance
+            self.right_hand_pos += self.right_hand_variance / (self.right_hand_variance + midi_variance) * (
+                        event.pitch - self.right_hand_pos)
+            self.right_hand_variance -= self.right_hand_variance / (
+                        self.right_hand_variance + midi_variance) * self.right_hand_variance
             self.time_last_rh = event.when
             self.last_was_left_hand = False
 
@@ -216,7 +222,7 @@ def evaluate_piece(data, key):
 
 
 def main():
-    data = kalman_mapper_data('data/', debug=False)
+    data = kalman_mapper_data(os.path.join(g_package_directory, 'data'), debug=False)
     evaluate_all(data)
 
 

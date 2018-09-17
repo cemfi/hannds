@@ -33,7 +33,8 @@ def main():
     X, Y = next(iter(loader))
     output, _, _ = model.forward(X)
     predicted_classes = torch.argmax(output, dim=3)
-    accuracy = train_nn.compute_accuracy(X, Y, predicted_classes)
+    filter_func = train_nn.majority_filter if desc['bidirectional'] else train_nn.causal_filter
+    accuracy = train_nn.compute_accuracy(X, Y, predicted_classes, filter_func)
     print(f'Test accuracy = {accuracy:.1f}')
 
 

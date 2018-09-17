@@ -1,18 +1,19 @@
 import argparse
+from collections import Counter
 import copy
 import datetime as dt
 import json
 import os
 
 import matplotlib.pyplot as plt
-import torch
 from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
 from tensorboardX import SummaryWriter
+import torch
 from torch import nn
 from torch.utils.data import DataLoader
-import numpy as np
 
-import hannds_data
+import hannds_data as hd
 
 # global vars
 g_debug = None
@@ -29,14 +30,16 @@ def main():
     parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
     parser.add_argument('--bidirectional', action='store_true', required=False, help='use a bi-directional LSTM')
     parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
+    parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
+                        help='the partition index (from 1 to 10) for 10-fold cross validation')
 
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
     print(f"Using {device}", flush=True)
     g_debug = args.debug
 
-    data = hannds_data.AllData(debug=args.debug)
-    data.initialize_from_dir(args.length)
+    data = hd.AllData(debug=args.debug)
+    data.initialize_from_dir(args.length, cv_partition=args.cv_partition)
     train_data = data.train_data
     valid_data = data.valid_data
     trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, args.bidirectional, device)
@@ -86,7 +89,7 @@ class Trainer(object):
         self.hidden_size = hidden_size
         self.bidirectional = bidirectional
 
-        sampler_train = hannds_data.ContinuationSampler(len(train_data), self.batch_size_train)
+        sampler_train = hd.ContinuationSampler(len(train_data), self.batch_size_train)
         self.data = {
             'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
             'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
@@ -122,6 +125,7 @@ class Trainer(object):
                 h_n, c_n = self.zero_state(phase)
                 phase_loss = (0.0, 0)
                 valid_accuracy = (0.0, 0)
+                valid_accuracy_plain = (0.0, 0)
                 self.model = self.model.train(phase == 'train')
 
                 for batch_idx, (X_batch, Y_batch) in enumerate(self.data[phase]):
@@ -135,9 +139,18 @@ class Trainer(object):
                             self.optimizer.step()
                         else:
                             predicted_classes = torch.argmax(output, dim=3)
-                            va1 = valid_accuracy[0] + compute_accuracy(X_batch, Y_batch, predicted_classes)
+                            filter_func = majority_filter if self.bidirectional else causal_filter
+                            X_numpy = X_batch.squeeze().cpu().numpy()
+                            Y_numpy = Y_batch.squeeze().cpu().numpy()
+                            classes_numpy = predicted_classes.squeeze().cpu().numpy()
+
+                            va1 = valid_accuracy[0] + compute_accuracy(X_numpy, Y_numpy, classes_numpy, filter_func)
                             va2 = valid_accuracy[1] + 1
                             valid_accuracy = (va1, va2)
+
+                            va1 = valid_accuracy_plain[0] + compute_accuracy(X_numpy, Y_numpy, classes_numpy)
+                            va2 = valid_accuracy_plain[1] + 1
+                            valid_accuracy_plain = (va1, va2)
 
                         h_n = h_n.detach()
                         c_n = c_n.detach()
@@ -151,11 +164,11 @@ class Trainer(object):
 
             end_ts = dt.datetime.now()
             t_total = (end_ts - start_ts).total_seconds()
-            self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
             if valid_accuracy[0] / valid_accuracy[1] > best_accuracy:
-                print('better')
                 best_accuracy = valid_accuracy[0] / valid_accuracy[1]
                 final_model = copy.deepcopy(self.model)
+                print('*')
+            self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy, valid_accuracy_plain)
 
         self.model = final_model
         plot_output(torch.softmax(output[0], dim=-1))
@@ -169,29 +182,33 @@ class Trainer(object):
         else:
             self.writer.add_scalar('accuracy', valid_accuracy[0] / valid_accuracy[1], epoch)
 
-    def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy):
+    def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy, valid_accuracy_plain):
+        filtered_acc = valid_accuracy[0] / valid_accuracy[1]
+        unfiltered_acc = valid_accuracy_plain[0] / valid_accuracy_plain[1]
         print(f'Epoch: {epoch}/{self.n_epochs - 1}, {t_total:.1f}sec')
         print('-' * 21)
         print(f'Train loss = {avg_loss["train"]:.6f}')
         print(f'Valid loss = {avg_loss["valid"]:.6f}')
-        print(f'Accuracy   = {valid_accuracy[0] / valid_accuracy[1]:.1f}%', flush=True)
+        print(f'Accuracy   = {filtered_acc:.1f}({unfiltered_acc:.1f})%', flush=True)
         print()
         print()
 
 
-def compute_accuracy(X, Y, predicted_classes):
+def compute_accuracy(X, Y, predicted_classes, filter_func=lambda x: x):
+    assert len(X.shape) == len(Y.shape) == len(predicted_classes.shape) == 2
     n_notes = X.sum()
-    pred_lh = predicted_classes == hannds_data.LEFT_HAND_LABEL
-    pred_rh = predicted_classes == hannds_data.RIGHT_HAND_LABEL
-    label_lh = Y == hannds_data.LEFT_HAND_LABEL
-    label_rh = Y == hannds_data.RIGHT_HAND_LABEL
-    n_lh_correct = (pred_lh * label_lh).sum().float()
-    n_rh_correct = (pred_rh * label_rh).sum().float()
+    predicted_classes = filter_func(predicted_classes)
+    pred_lh = predicted_classes == hd.LEFT_HAND_LABEL
+    pred_rh = predicted_classes == hd.RIGHT_HAND_LABEL
+    label_lh = Y == hd.LEFT_HAND_LABEL
+    label_rh = Y == hd.RIGHT_HAND_LABEL
+    n_lh_correct = (pred_lh * label_lh).sum()
+    n_rh_correct = (pred_rh * label_rh).sum()
     assert n_lh_correct <= n_notes
     assert n_rh_correct <= n_notes
     n_correct = n_lh_correct + n_rh_correct
     assert n_correct <= n_notes
-    return n_correct.float() / n_notes.float() * 100.0
+    return n_correct / n_notes * 100.0
 
 
 def plot_output(output, max_pages=32):
@@ -204,6 +221,52 @@ def plot_output(output, max_pages=32):
                 ax.imshow(image, cmap='bwr', origin='lower', vmin=-1, vmax=1)
                 pdf.savefig(fig)
                 plt.close()
+
+
+def causal_filter(predicted_classes):
+    """
+    Filters the predicted classes: the assignment is decided at the
+    note-on event. Changes the content of predicted_classes.
+    """
+    predicted_classes = predicted_classes.copy()
+    for row in range(1, predicted_classes.shape[0]):
+        last_line = predicted_classes[row - 1]
+        current_line = predicted_classes[row]
+        both_note_on = np.logical_and(current_line != hd.NOT_PLAYED_LABEL, last_line != hd.NOT_PLAYED_LABEL)
+        predicted_classes[row, both_note_on] = last_line[both_note_on]
+
+    return predicted_classes
+
+
+def majority_filter(predicted_classes):  # Needs to be profiled
+    """
+    Filters the predicted classes: the assignment is decided at the
+    note-off event. Changes the content of predicted_classes.
+    """
+    predicted_classes = predicted_classes.copy()
+    for column in range(predicted_classes.shape[1]):
+        row = 0
+        while row < predicted_classes.shape[0]:
+            last_note = predicted_classes[row - 1, column] if row > 0 else 0
+            current_note = predicted_classes[row, column]
+            start = row
+            if last_note == hd.NOT_PLAYED_LABEL and current_note != hd.NOT_PLAYED_LABEL:
+                row += 1
+                while row < predicted_classes.shape[0]:
+                    current_note = predicted_classes[row, column]
+                    if current_note == hd.NOT_PLAYED_LABEL or row == predicted_classes.shape[0] - 1:
+                        end = row
+                        c = Counter(predicted_classes[start: end, column])
+                        majority_value, _ = c.most_common()[0]
+                        predicted_classes[start: end, column] = majority_value
+                        row += 1
+                        break
+                    else:
+                        row += 1
+            else:
+                row += 1
+
+    return predicted_classes
 
 
 if __name__ == '__main__':

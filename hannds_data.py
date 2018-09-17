@@ -10,29 +10,50 @@ import pretty_midi
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import Sampler
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
+
+g_package_directory = os.path.dirname(os.path.abspath(__file__))
+
+
+# Helpers
+
+def get_files_from_path(path, extensions):
+    if os.path.isfile(path):  # Load single file
+        files = [path]
+    else:  # Get list of all files with correct extensions in path
+        files = []
+        for file_type in extensions:
+            files.extend(glob.glob(os.path.join(path, file_type)))
+
+        if len(files) == 0:
+            raise FileNotFoundError(f'No files found with correct extensions {str(extensions)} in {path}')
+    return sorted(files)
 
 
 class AllData(object):
     def __init__(self, debug=False):
-        self._convert('data/', overwrite=False)
+        self._convert(os.path.join(g_package_directory, 'data'), overwrite=False)
         self.train_files = self.valid_files = self.test_files = None
         self.debug = debug
 
-    def initialize_from_dir(self, len_train_sequence):
-        all_files = self._get_files_from_path('data/', ['*.npy'])
+    def initialize_from_dir(self, len_train_sequence, cv_partition=1):
+        all_files = get_files_from_path(os.path.join(g_package_directory, 'data'), ['*.npy'])
         r = random.Random(42)  # seed is arbitrary
         r.shuffle(all_files)
-        n_valid_test = math.ceil(len(all_files) * 0.15)
-        n_train = len(all_files) - n_valid_test * 2
-        range_train = (0, n_train)
-        range_valid = (range_train[1], range_train[1] + n_valid_test)
-        range_test = (range_valid[1], range_valid[1] + n_valid_test)
-        assert range_test[1] == len(all_files)
 
-        self.train_files = all_files[range_train[0]: range_train[1]]
-        self.valid_files = all_files[range_valid[0]: range_valid[1]]
-        self.test_files = all_files[range_test[0]: range_test[1]]
+        test_begin, test_end = self._hold_out_range(cv_partition, len(all_files))
+        n_valid = math.ceil(len(all_files) * 0.2)
+        if test_end + n_valid < len(all_files):
+            valid_begin = test_end
+            valid_end = valid_begin + n_valid
+        else:
+            valid_end = test_begin
+            valid_begin = valid_end - n_valid
+
+        self.test_files = all_files[test_begin: test_end]
+        self.valid_files = all_files[valid_begin: valid_end]
+        self.train_files = [f for f in all_files if f not in self.test_files and f not in self.valid_files]
+
         self._make_datasets(len_train_sequence)
 
     def initialize_from_lists(self, train_files, valid_files, test_files, len_train_sequence):
@@ -41,25 +62,32 @@ class AllData(object):
         self.test_files = test_files.copy()
         self._make_datasets(len_train_sequence)
 
+    def _n_hold_out(self, cv_partition, n_files):
+        """
+        How many MIDI files should be held out in cross validation step
+        cv_step. Step index starts with 1.
+        """
+        assert cv_partition >= 1
+        for step in range(1, cv_partition):
+            n_in_past_step = math.ceil(n_files / (10 - step + 1))
+            n_files -= n_in_past_step
+        return math.ceil(n_files / (10 - cv_partition + 1))
+
+    def _hold_out_range(self, cv_partition, n_files):
+        begin = 0
+        for step in range(1, cv_partition):
+            begin += self._n_hold_out(step, n_files)
+
+        end = begin + self._n_hold_out(cv_partition, n_files)
+        return begin, end
+
     def _make_datasets(self, len_train_sequence):
         self.train_data = self._dataset_for_files(self.train_files, len_train_sequence, debug=self.debug)
         self.valid_data = self._dataset_for_files(self.valid_files, len_sequence=-1, debug=self.debug)
         self.test_data = self._dataset_for_files(self.test_files, len_sequence=-1, debug=self.debug)
 
-    def _get_files_from_path(self, path, extensions):
-        if os.path.isfile(path):  # Load single file
-            files = [path]
-        else:  # Get list of all files with correct extensions in path
-            files = []
-            for file_type in extensions:
-                files.extend(glob.glob(os.path.join(path, file_type)))
-
-            if len(files) == 0:
-                raise FileNotFoundError('No files found with correct extensions ' + str(extensions))
-        return sorted(files)
-
     def _convert(self, path, ms_window=20, overwrite=True):
-        midi_files = self._get_files_from_path(path, ['*.mid', '*.midi'])
+        midi_files = get_files_from_path(path, ['*.mid', '*.midi'])
 
         samples_per_sec = 1000 // ms_window
         for midi_file in midi_files:
@@ -100,13 +128,14 @@ class AllData(object):
 
 XY = namedtuple('XY', ['X', 'Y'])
 
+NOT_PLAYED_LABEL = 0
 LEFT_HAND_LABEL = 1
 RIGHT_HAND_LABEL = 2
 
 
 class HanndsDataset(Dataset):
     """
-    provides the Hannds dataset as (overlapping) sequences of size
+    Provides the Hannds dataset as (overlapping) sequences of size
     len_sequence. If len_sequenc == -1, it provides a single sequence
     of maximal length.
     """
@@ -170,21 +199,19 @@ class ContinuationSampler(Sampler):
                 yield index
                 index += step
 
-        raise StopIteration
+        return
 
 
 def main():
-    data = AllData(len_train_sequence=100, debug=True)
-    data._convert('data/', overwrite=False)
+    data = AllData(debug=True)
+    data.initialize_from_dir(len_train_sequence=100)
 
     import matplotlib.pyplot as plt
 
     train_data = data.train_data
     batchX, batchY = train_data[0]
-    print(batchX.shape)
-    print(batchY.shape)
 
-    batch_size = 20
+    batch_size = 50
     continuity = ContinuationSampler(len(train_data), batch_size)
     loader = DataLoader(train_data, batch_size, sampler=continuity)
 
@@ -197,6 +224,8 @@ def main():
 
         plt.imshow(img, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         plt.show()
+
+        if idx == 5: break
 
 
 if __name__ == '__main__':

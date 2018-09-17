@@ -8,6 +8,7 @@ dependencies:
   - matplotlib
   - pytorch
   - cudatoolkit
+  - pytest
   - pip
   - pip:
     - mido
