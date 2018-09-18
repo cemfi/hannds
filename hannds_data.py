@@ -1,163 +1,142 @@
-import glob
-import logging
 import math
-import os
-import random
 from collections import namedtuple
+import os
 
 import numpy as np
 import pretty_midi
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import Sampler
 
-logging.basicConfig(level=logging.WARNING)
-
-g_package_directory = os.path.dirname(os.path.abspath(__file__))
+import hannds_files
 
 
-# Helpers
-
-def get_files_from_path(path, extensions):
-    if os.path.isfile(path):  # Load single file
-        files = [path]
-    else:  # Get list of all files with correct extensions in path
-        files = []
-        for file_type in extensions:
-            files.extend(glob.glob(os.path.join(path, file_type)))
-
-        if len(files) == 0:
-            raise FileNotFoundError(f'No files found with correct extensions {str(extensions)} in {path}')
-    return sorted(files)
+def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=False):
+    make_npz_files(overwrite=False, subdir='windowed', convert_func=convert_windowed)
+    all_files = hannds_files.TrainValidTestFiles()
+    all_files.read_files_from_dir(cv_partition)
+    train_data = HanndsDataset(all_files.train_files, 'windowed', len_sequence=len_train_sequence, debug=debug)
+    valid_data = HanndsDataset(all_files.valid_files, 'windowed', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(all_files.test_files, 'windowed', len_sequence=-1, debug=debug)
+    return train_data, valid_data, test_data
 
 
-class AllData(object):
-    def __init__(self, debug=False):
-        self._convert(os.path.join(g_package_directory, 'data'), overwrite=False)
-        self.train_files = self.valid_files = self.test_files = None
-        self.debug = debug
-
-    def initialize_from_dir(self, len_train_sequence, cv_partition=1):
-        all_files = get_files_from_path(os.path.join(g_package_directory, 'data'), ['*.npy'])
-        r = random.Random(42)  # seed is arbitrary
-        r.shuffle(all_files)
-
-        test_begin, test_end = self._hold_out_range(cv_partition, len(all_files))
-        n_valid = math.ceil(len(all_files) * 0.2)
-        if test_end + n_valid < len(all_files):
-            valid_begin = test_end
-            valid_end = valid_begin + n_valid
-        else:
-            valid_end = test_begin
-            valid_begin = valid_end - n_valid
-
-        self.test_files = all_files[test_begin: test_end]
-        self.valid_files = all_files[valid_begin: valid_end]
-        self.train_files = [f for f in all_files if f not in self.test_files and f not in self.valid_files]
-
-        self._make_datasets(len_train_sequence)
-
-    def initialize_from_lists(self, train_files, valid_files, test_files, len_train_sequence):
-        self.train_files = train_files.copy()
-        self.valid_files = valid_files.copy()
-        self.test_files = test_files.copy()
-        self._make_datasets(len_train_sequence)
-
-    def _n_hold_out(self, cv_partition, n_files):
-        """
-        How many MIDI files should be held out in cross validation step
-        cv_step. Step index starts with 1.
-        """
-        assert cv_partition >= 1
-        for step in range(1, cv_partition):
-            n_in_past_step = math.ceil(n_files / (10 - step + 1))
-            n_files -= n_in_past_step
-        return math.ceil(n_files / (10 - cv_partition + 1))
-
-    def _hold_out_range(self, cv_partition, n_files):
-        begin = 0
-        for step in range(1, cv_partition):
-            begin += self._n_hold_out(step, n_files)
-
-        end = begin + self._n_hold_out(cv_partition, n_files)
-        return begin, end
-
-    def _make_datasets(self, len_train_sequence):
-        self.train_data = self._dataset_for_files(self.train_files, len_train_sequence, debug=self.debug)
-        self.valid_data = self._dataset_for_files(self.valid_files, len_sequence=-1, debug=self.debug)
-        self.test_data = self._dataset_for_files(self.test_files, len_sequence=-1, debug=self.debug)
-
-    def _convert(self, path, ms_window=20, overwrite=True):
-        midi_files = get_files_from_path(path, ['*.mid', '*.midi'])
-
-        samples_per_sec = 1000 // ms_window
-        for midi_file in midi_files:
-            npy_file = midi_file + '_' + str(ms_window) + 'ms' + '.npy'
-
-            if overwrite or not os.path.exists(npy_file):
-                midi = pretty_midi.PrettyMIDI(midi_file)
-                logging.debug("Converting file '" + midi_file + "'")
-                midi_data = midi.instruments[0], midi.instruments[1]
-
-                # Generate empty numpy arrays
-                n_windows = math.ceil(midi.get_end_time() * samples_per_sec)
-                hands = np.zeros((
-                    n_windows,  # Number of windows to calculate
-                    2,  # Left and right hand = 2 hands
-                    88  # 88 keys on a piano
-                ), dtype=np.bool)
-
-                # Fill array with data
-                for hand, midi_hand in enumerate(midi_data):
-                    for note in midi_hand.notes:
-                        start = int(math.floor(note.start * samples_per_sec))
-                        end = int(math.ceil(note.end * samples_per_sec))
-                        hands[start:end, hand, note.pitch - 21] = True
-
-                # Save array to disk
-                np.save(npy_file, hands)
-
-    def _dataset_for_files(self, npy_files, len_sequence, debug=False):
-        if debug:
-            npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files[:2]], axis=0)
-        else:
-            npy_data = np.concatenate([np.load(npy_file) for npy_file in npy_files], axis=0)
-
-        data_set = HanndsDataset(npy_data, len_sequence)
-        return data_set
+def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False):
+    make_npz_files(overwrite=False, subdir='event', convert_func=convert_event)
+    all_files = hannds_files.TrainValidTestFiles()
+    all_files.read_files_from_dir(cv_partition)
+    train_data = HanndsDataset(all_files.train_files, 'event', len_sequence=len_train_sequence, debug=debug)
+    valid_data = HanndsDataset(all_files.valid_files, 'event', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(all_files.test_files, 'event', len_sequence=-1, debug=debug)
+    return train_data, valid_data, test_data
 
 
-XY = namedtuple('XY', ['X', 'Y'])
+WINDOWED_NOT_PLAYED_LABEL = 0
+WINDOWED_LEFT_HAND_LABEL = 1
+WINDOWED_RIGHT_HAND_LABEL = 2
 
-NOT_PLAYED_LABEL = 0
-LEFT_HAND_LABEL = 1
-RIGHT_HAND_LABEL = 2
+
+def make_npz_files(overwrite, subdir, convert_func):
+    midi_files = hannds_files.all_midi_files(absolute_path=True)
+    npy_paths = hannds_files.npz_files_for_midi(midi_files, subdir)
+
+    for midi_file, npy_path in zip(midi_files, npy_paths):
+        if overwrite or not os.path.exists(npy_path):
+            print("Converting file '" + midi_file + "'")
+            midi = pretty_midi.PrettyMIDI(midi_file)
+            X, Y = convert_func(midi)
+            np.savez(npy_path, X=X, Y=Y)
+
+
+def convert_windowed(midi):
+    ms_window = 20
+    samples_per_sec = 1000 // ms_window
+    midi_data = midi.instruments[0], midi.instruments[1]
+
+    # Generate empty numpy arrays
+    n_windows = math.ceil(midi.get_end_time() * samples_per_sec)
+    hands = np.zeros((
+        n_windows,  # Number of windows to calculate
+        2,  # Left and right hand = 2 hands
+        88  # 88 keys on a piano
+    ), dtype=np.bool)
+
+    # Fill array with data
+    for hand, midi_hand in enumerate(midi_data):
+        for note in midi_hand.notes:
+            start = int(math.floor(note.start * samples_per_sec))
+            end = int(math.ceil(note.end * samples_per_sec))
+            hands[start:end, hand, note.pitch - 21] = True
+
+    data = hands
+    batch_size = n_windows
+    # Merge both hands in a single array
+    X = np.logical_or(
+        data[:, 0, :],
+        data[:, 1, :]
+    )
+
+    Y = np.zeros((batch_size, 88))  # == WINDOWED_NOT_PLAYED_LABEL
+    Y[data[:, 0, :]] = WINDOWED_LEFT_HAND_LABEL
+    Y[data[:, 1, :]] = WINDOWED_RIGHT_HAND_LABEL
+
+    return X.astype(np.float32), Y.astype(np.longlong)
+
+
+def convert_event(midi):
+    num_notes = 0
+    for instrument in midi.instruments:
+        num_notes += len(instrument.notes)
+
+    # # Generate empty numpy array
+    events = np.empty((2 * num_notes, 1 + 1 + 3))
+
+    # Generate event list
+    # Format:[    0    ,        1      ,     2   ,    3  ,     4     ]
+    #        [timestamp, midi_pitch/127, is_start, is_end, left|right]
+    i = 0
+    for hand, instrument in enumerate(midi.instruments):
+        notes = instrument.notes
+        for note in notes:
+            events[i:i + 2, 1] = note.pitch / 127
+            events[i:i + 2, 4] = hand  # 0 = Right, 1 = Left
+
+            events[i, 0] = note.start  # Timestamp note on
+            events[i, 2:4] = [1, 0]  # One hot vector for note on
+
+            events[i + 1, 0] = note.end  # Timestamp note off
+            events[i + 1, 2:4] = [0, 1]  # One hot vector for note off
+
+            i += 2
+
+    # Compute timestamp deltas
+    events = events[events[:, 0].argsort()]  # Sort by column 0
+    events[1:, 0] = np.diff(events[:, 0])
+    events[0, 0] = 0  # Find something more suitable for the first entry
+    events[:, 0] = np.maximum(events[:, 0], 0)  # Don't allow negative time deltas (happens at file borders)
+
+    return events[:, :4].astype(np.float32), events[:, 4].astype(np.longlong)
 
 
 class HanndsDataset(Dataset):
     """
-    Provides the Hannds dataset as (overlapping) sequences of size
-    len_sequence. If len_sequenc == -1, it provides a single sequence
-    of maximal length.
+    Provides the Hannds dataset as sequences of size len_sequence.
+    If len_sequenc == -1, it provides a single sequence of maximal
+    length.
     """
 
-    def __init__(self, npy_data, len_sequence):
+    XY = namedtuple('XY', ['X', 'Y'])
+
+    def __init__(self, midi_files, subdir, len_sequence, debug):
         self.len_sequence = len_sequence
-        self.data = XY(*self._compute_X_Y(npy_data))
+        npz_files = hannds_files.npz_files_for_midi(midi_files, subdir)
+        if debug:
+            load_all = [np.load(npz_file) for npz_file in npz_files[:2]]
+        else:
+            load_all = [np.load(npz_file) for npz_file in npz_files]
 
-    def _compute_X_Y(self, data):
-        data = data.astype(np.bool)
-
-        batch_size = data.shape[0]
-        # Merge both hands in a single array
-        X = np.logical_or(
-            data[:, 0, :],
-            data[:, 1, :]
-        )
-
-        Y = np.zeros((batch_size, 88))
-        Y[data[:, 0, :]] = LEFT_HAND_LABEL
-        Y[data[:, 1, :]] = RIGHT_HAND_LABEL
-        return X.astype(np.float32), Y.astype(np.longlong)
+        X = np.concatenate([item['X'] for item in load_all], axis=0)
+        Y = np.concatenate([item['Y'] for item in load_all], axis=0)
+        self.data = self.XY(X, Y)
 
     def __len__(self):
         if self.len_sequence == -1:
@@ -175,6 +154,12 @@ class HanndsDataset(Dataset):
             res2 = self.data.Y[start: end]
             assert res1.shape[0] == res2.shape[0] == self.len_sequence
             return res1, res2
+
+    def len_features(self):
+        return self.data.X.shape[1]
+
+    def num_categories(self):
+        return np.max(self.data.Y) + 1
 
 
 class ContinuationSampler(Sampler):
@@ -203,17 +188,24 @@ class ContinuationSampler(Sampler):
 
 
 def main():
-    data = AllData(debug=True)
-    data.initialize_from_dir(len_train_sequence=100)
+    print('Making windowed')
+    make_npz_files(overwrite=True, subdir='windowed', convert_func=convert_windowed)
+    print()
+    print('Making event')
+    make_npz_files(overwrite=True, subdir='event', convert_func=convert_event)
+    print()
+
+    f = hannds_files.TrainValidTestFiles()
+    f.read_files_from_dir()
+    data = HanndsDataset(f.train_files, 'windowed', 100, debug=False)
 
     import matplotlib.pyplot as plt
 
-    train_data = data.train_data
-    batchX, batchY = train_data[0]
+    batchX, batchY = data[0]
 
     batch_size = 50
-    continuity = ContinuationSampler(len(train_data), batch_size)
-    loader = DataLoader(train_data, batch_size, sampler=continuity)
+    continuity = ContinuationSampler(len(data), batch_size)
+    loader = DataLoader(data, batch_size, sampler=continuity)
 
     for idx, (X_batch, Y_batch) in enumerate(loader):
         X = X_batch[8]

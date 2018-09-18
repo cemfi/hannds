@@ -36,4 +36,4 @@ def test_kalman_mapper():
 
 
 def test_kalman_main():
-    kalman_mapper.main()
+    kalman_mapper.main(debug=True)

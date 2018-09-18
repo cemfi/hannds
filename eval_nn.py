@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import hannds_data
-from train_nn import Network
+from train_nn import Network88
 import train_nn
 
 
@@ -22,8 +22,8 @@ def main():
     with open(desc_path) as file:
         desc = json.load(file)
 
-    data = hannds_data.AllData()
-    data.initialize_from_lists(desc['train'], desc['valid'], desc['test'], len_train_sequence=1)
+    data = data.DataFiles()
+    data.set_files_from_lists(desc['train'], desc['valid'], desc['test'], len_train_sequence=1)
     test_data = data.test_data
 
     model = torch.load(model_path, map_location='cpu')

@@ -7,6 +7,7 @@ from mido.midifiles.tracks import _to_abstime
 import scipy.stats
 
 import hannds_data
+import hannds_files
 
 g_package_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -15,7 +16,7 @@ g_package_directory = os.path.dirname(os.path.abspath(__file__))
 
 def kalman_mapper_data(path, debug=False):
     data_dict = {}
-    midi_files = hannds_data.get_files_from_path(path, ['*.mid', '*.midi'])
+    midi_files = hannds_files.all_midi_files(absolute_path=True)
 
     for idx, midi_file in enumerate(midi_files):
         midi = mido.MidiFile(midi_file)
@@ -209,18 +210,31 @@ class KalmanMapper(object):
 def evaluate_all(data):
     total_correct = 0
     total_wrong = 0
+    correct_forward = 0
+    wrong_forward = 0
+    correct_backward = 0
+    wrong_backward = 0
     for key in data.keys():
-        correct, wrong = evaluate_piece(data, key)
-        total_correct += correct
-        total_wrong += wrong
+        accuracy = evaluate_piece(data, key)
+        total_correct += accuracy.correct
+        total_wrong += accuracy.wrong
+        correct_forward += accuracy.correct_forward
+        wrong_forward += accuracy.wrong_forward
+        correct_backward += accuracy.correct_backward
+        wrong_backward += accuracy.wrong_backward
 
     acc = total_correct / (total_correct + total_wrong) * 100.0
-    out_str = f'Total accuracy = {acc:.2f}% ({total_correct} / {total_correct + total_wrong})'
-    print('-' * len(out_str))
-    print(out_str)
+    acc_forward = correct_forward / (correct_forward + wrong_forward) * 100.0
+    acc_backward = correct_backward / (correct_backward + wrong_backward) * 100.0
+
+    print('-' * 60)
+    print('Summary')
+    print(f'Accuracy, forward-backward = {acc:.2f}% ({total_correct} / {total_correct + total_wrong})')
+    print(f'Accuracy, forward only     = {acc_forward:.2f}% ({correct_forward} / {correct_forward + wrong_forward})')
+    print(f'Accuracy, backward only    = {acc_backward:.2f}% ({correct_backward} / {correct_backward + wrong_backward})')
 
 
-def note_off_mapping(events):
+def note_off_mapping(events):  # Maybe write a more efficient version
     note_on_idx = -1
     note_off_idx = 0
     result = []
@@ -252,29 +266,34 @@ def evaluate_piece(data, key):
     print(key)
     forward_mapper = KalmanMapper()
     backward_mapper = KalmanMapper()
-    correct_notes = 0
-    wrong_notes = 0
+
+    correct_forward = 0
+    wrong_forward = 0
     for event in data[key]:
         forward_mapper.midi_event(event)
-        # if event.is_note_on:
-        #     if forward_mapper.last_was_left_hand == event.is_left:
-        #         correct_notes += 1
-        #     else:
-        #         wrong_notes += 1
+        if event.is_note_on:
+            if forward_mapper.last_was_left_hand == event.is_left:
+                correct_forward += 1
+            else:
+                wrong_forward += 1
 
+    correct_backward = 0
+    wrong_backward = 0
     start_time = data[key][-1].when
     for event in reversed(data[key]):
         event = MidiEvent(event.pitch, not event.is_note_on, start_time - event.when, event.is_left)
         backward_mapper.midi_event(event)
-        # if event.is_note_on:
-        #     if backward_mapper.last_was_left_hand == event.is_left:
-        #         correct_notes += 1
-        #     else:
-        #         wrong_notes += 1
+        if event.is_note_on:
+            if backward_mapper.last_was_left_hand == event.is_left:
+                correct_backward += 1
+            else:
+                wrong_backward += 1
 
     result_forward = forward_mapper.saved_result
     result_backward = list(reversed(backward_mapper.saved_result))
     note_off_indices = note_off_mapping(data[key])
+    correct_notes = 0
+    wrong_notes = 0
     idx = 0
     for event in data[key]:
         if not event.is_note_on: continue
@@ -294,15 +313,21 @@ def evaluate_piece(data, key):
         idx += 1
 
     accuracy = correct_notes / (correct_notes + wrong_notes) * 100.0
-    print(f'Accuracy = {accuracy:.1f}% ({correct_notes} / {correct_notes + wrong_notes})')
+    acc_foward = correct_forward / (correct_forward + wrong_forward) * 100.0
+    acc_backward = correct_backward / (correct_backward + wrong_backward) * 100.0
+    print(f'Accuracy, forward-backward = {accuracy:.1f}% ({correct_notes} / {correct_notes + wrong_notes})')
+    print(f'Accuracy, forward only     = {acc_foward:.1f}% ({correct_forward} / {correct_forward + wrong_forward})')
+    print(f'Accuracy, backward only    = {acc_backward:.1f}% ({correct_backward} / {correct_backward + wrong_backward})')
     print()
-    return correct_notes, wrong_notes
+
+    Accuracy = namedtuple('Accuracy', 'correct wrong correct_forward wrong_forward correct_backward wrong_backward')
+    return Accuracy(correct_notes, wrong_notes, correct_forward, wrong_forward, correct_backward, wrong_backward)
 
 
-def main():
-    data = kalman_mapper_data(os.path.join(g_package_directory, 'data'), debug=False)
+def main(debug=False):
+    data = kalman_mapper_data(os.path.join(g_package_directory, 'data'), debug=debug)
     evaluate_all(data)
 
 
 if __name__ == '__main__':
-    main()
+    main(False)

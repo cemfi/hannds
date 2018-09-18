@@ -1,9 +1,9 @@
-from hannds_data import AllData
+from hannds_files import TrainValidTestFiles
 import hannds_data
 
 
 def test_n_hold_out():
-    data = AllData()
+    data = TrainValidTestFiles()
     for step in range(1, 11):
         n = data._n_hold_out(cv_partition=step, n_files=94)
         if step <= 4:
@@ -13,7 +13,7 @@ def test_n_hold_out():
 
 
 def test_hold_out_range():
-    data = AllData()
+    data = TrainValidTestFiles()
     (begin, end) = data._hold_out_range(cv_partition=1, n_files=94)
     assert (begin, end) == (0, 10)
     (begin, end) = data._hold_out_range(cv_partition=2, n_files=94)
@@ -37,12 +37,12 @@ def test_hold_out_range():
 
 
 def test_disjoint():
-    data = AllData()
+    files = TrainValidTestFiles()
     for cv_index in range(1, 11):
-        data.initialize_from_dir(len_train_sequence=1, cv_partition=cv_index)
-        a = set(data.train_files)
-        b = set(data.valid_files)
-        c = set(data.test_files)
+        files.read_files_from_dir(cv_partition=cv_index)
+        a = set(files.train_files)
+        b = set(files.valid_files)
+        c = set(files.test_files)
         assert a.isdisjoint(b)
         assert a.isdisjoint(c)
         assert b.isdisjoint(c)

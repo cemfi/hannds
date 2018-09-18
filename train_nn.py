@@ -17,7 +17,7 @@ import hannds_data as hd
 
 # global vars
 g_debug = None
-g_time = dt.datetime.now().strftime('%m-%d-%H%M-%S')
+g_time = dt.datetime.now().strftime('%m-%d-%H%M')
 
 
 def main():
@@ -38,42 +38,40 @@ def main():
     print(f"Using {device}", flush=True)
     g_debug = args.debug
 
-    data = hd.AllData(debug=args.debug)
-    data.initialize_from_dir(args.length, cv_partition=args.cv_partition)
-    train_data = data.train_data
-    valid_data = data.valid_data
-    trainer = Trainer(train_data, valid_data, args.hidden_size, args.layers, args.bidirectional, device)
+    train_data, valid_data, _ = \
+        hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args.cv_partition, debug=args.debug)
+    trainer = Trainer(train_data, valid_data, args, device)
     trainer.run()
     model = trainer.model
     if not os.path.exists('models'):
         os.mkdir('models')
 
-    os.mkdir('models/' + g_time)
-    torch.save(model, f'models/{g_time}/model.pt')
+    directory = f'models/{g_time}-p{os.getpid()}'
+    os.mkdir(directory)
+    torch.save(model, directory + '/model.pt')
     desc = {
-        'args': vars(args),
-        'train': data.train_files,
-        'valid': data.valid_files,
-        'test': data.test_files
+        'args': vars(args)
     }
-    with open(f'models/{g_time}/desc.json', 'w') as file:
+    with open(directory + '/desc.json', 'w') as file:
         json.dump(desc, file, indent=4)
 
 
-class Network(nn.Module):
-    def __init__(self, hidden_size, n_layers, bidirectional):
-        super(Network, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
+class Network88(nn.Module):
+    def __init__(self, hidden_size, n_layers, bidirectional, n_features, n_categories):
+        super(Network88, self).__init__()
+        self.lstm = nn.LSTM(input_size=n_features, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
                             dropout=0.5, bidirectional=bidirectional)
         self.n_directions = 2 if bidirectional else 1
-        self.out_linear = nn.Linear(hidden_size * self.n_directions, 88 * 3)
+        self.out_linear = nn.Linear(hidden_size * self.n_directions, n_features * n_categories)
         self.n_layers = n_layers
+        self.n_features = n_features
+        self.n_categories = n_categories
 
     def forward(self, input, h_prev=None, c_prev=None):
         hidden_in = (h_prev, c_prev) if h_prev is not None else None
         lstm_output, (h_n, c_n) = self.lstm.forward(input, hidden_in)
         output = self.out_linear(lstm_output)
-        output = output.view(-1, output.shape[1], 88, 3)
+        output = output.view(-1, output.shape[1], self.n_features, self.n_categories)
         # Residual connection
         # output[:, :, :, 0] += 1.0 - input
         # output[:, :, :, 1] += input
@@ -82,26 +80,28 @@ class Network(nn.Module):
 
 
 class Trainer(object):
-    def __init__(self, train_data, valid_data, hidden_size, layers, bidirectional, device):
+    def __init__(self, train_data, valid_data, args, device):
         self.n_epochs = 50
         self.batch_size_train = 10
-        self.layers = layers
-        self.hidden_size = hidden_size
-        self.bidirectional = bidirectional
+        self.layers = args.layers
+        self.hidden_size = args.hidden_size
+        self.bidirectional = args.bidirectional
 
         sampler_train = hd.ContinuationSampler(len(train_data), self.batch_size_train)
         self.data = {
             'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
             'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
         }
-        self.model = Network(hidden_size, layers, bidirectional).to(device)
+        num_features = train_data.len_features()
+        num_categories = train_data.num_categories()
+        self.model = Network88(self.hidden_size, self.layers, self.bidirectional, num_features, num_categories).to(device)
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         self.device = device
 
-        bi_str = '-bidirectional' if bidirectional else ''
-        desc = f"hidden{hidden_size}_layers{layers}{bi_str}"
-        self.writer = SummaryWriter('runs/' + g_time + '-' + desc)
+        bi_str = '-bidirectional' if self.bidirectional else ''
+        desc = f"hidden{args.hidden_size}_layers{args.layers}{bi_str}"
+        self.writer = SummaryWriter(f'runs/{g_time}-p{os.getpid()}-{desc}')
 
     def zero_state(self, phase):
         n_directions = self.model.n_directions
@@ -133,13 +133,13 @@ class Trainer(object):
                         X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
                         self.optimizer.zero_grad()
                         output, h_n, c_n = self.model(X_batch, h_n, c_n)
-                        train_loss = self.criterion(output.view((-1, 3)), Y_batch.view(-1))
+                        train_loss = self.criterion(output.view((-1, self.model.n_categories)), Y_batch.view(-1))
                         if phase == 'train':
                             train_loss.backward()
                             self.optimizer.step()
                         else:
                             predicted_classes = torch.argmax(output, dim=3)
-                            filter_func = majority_filter if self.bidirectional else causal_filter
+                            filter_func = causal_filter
                             X_numpy = X_batch.squeeze().cpu().numpy()
                             Y_numpy = Y_batch.squeeze().cpu().numpy()
                             classes_numpy = predicted_classes.squeeze().cpu().numpy()
@@ -191,17 +191,17 @@ class Trainer(object):
         print(f'Valid loss = {avg_loss["valid"]:.6f}')
         print(f'Accuracy   = {filtered_acc:.1f}({unfiltered_acc:.1f})%', flush=True)
         print()
-        print()
+        print(flush=True)
 
 
 def compute_accuracy(X, Y, predicted_classes, filter_func=lambda x: x):
     assert len(X.shape) == len(Y.shape) == len(predicted_classes.shape) == 2
     n_notes = X.sum()
     predicted_classes = filter_func(predicted_classes)
-    pred_lh = predicted_classes == hd.LEFT_HAND_LABEL
-    pred_rh = predicted_classes == hd.RIGHT_HAND_LABEL
-    label_lh = Y == hd.LEFT_HAND_LABEL
-    label_rh = Y == hd.RIGHT_HAND_LABEL
+    pred_lh = predicted_classes == hd.WINDOWED_LEFT_HAND_LABEL
+    pred_rh = predicted_classes == hd.WINDOWED_RIGHT_HAND_LABEL
+    label_lh = Y == hd.WINDOWED_LEFT_HAND_LABEL
+    label_rh = Y == hd.WINDOWED_RIGHT_HAND_LABEL
     n_lh_correct = (pred_lh * label_lh).sum()
     n_rh_correct = (pred_rh * label_rh).sum()
     assert n_lh_correct <= n_notes
@@ -232,7 +232,7 @@ def causal_filter(predicted_classes):
     for row in range(1, predicted_classes.shape[0]):
         last_line = predicted_classes[row - 1]
         current_line = predicted_classes[row]
-        both_note_on = np.logical_and(current_line != hd.NOT_PLAYED_LABEL, last_line != hd.NOT_PLAYED_LABEL)
+        both_note_on = np.logical_and(current_line != hd.WINDOWED_NOT_PLAYED_LABEL, last_line != hd.WINDOWED_NOT_PLAYED_LABEL)
         predicted_classes[row, both_note_on] = last_line[both_note_on]
 
     return predicted_classes
@@ -250,11 +250,11 @@ def majority_filter(predicted_classes):  # Needs to be profiled
             last_note = predicted_classes[row - 1, column] if row > 0 else 0
             current_note = predicted_classes[row, column]
             start = row
-            if last_note == hd.NOT_PLAYED_LABEL and current_note != hd.NOT_PLAYED_LABEL:
+            if last_note == hd.WINDOWED_NOT_PLAYED_LABEL and current_note != hd.WINDOWED_NOT_PLAYED_LABEL:
                 row += 1
                 while row < predicted_classes.shape[0]:
                     current_note = predicted_classes[row, column]
-                    if current_note == hd.NOT_PLAYED_LABEL or row == predicted_classes.shape[0] - 1:
+                    if current_note == hd.WINDOWED_NOT_PLAYED_LABEL or row == predicted_classes.shape[0] - 1:
                         end = row
                         c = Counter(predicted_classes[start: end, column])
                         majority_value, _ = c.most_common()[0]
