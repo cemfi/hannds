@@ -1,8 +1,10 @@
 import os
 from collections import namedtuple
+import math
 
 import mido
 from mido.midifiles.tracks import _to_abstime
+import scipy.stats
 
 import hannds_data
 
@@ -135,6 +137,7 @@ class KalmanMapper(object):
         self.time_last_rh = None
         self.time_last_lh = None
         self.last_was_left_hand = False  # the result
+        self.saved_result = []
 
     def midi_event(self, event):
         variance_per_second = 20.0
@@ -148,17 +151,31 @@ class KalmanMapper(object):
         for p in self.hand_constraints.left_hand():
             if p == event.pitch:
                 assign_left = True
+                self.saved_result.append(('left', 1.0))
 
         assign_right = False
-        for p in self.hand_constraints.right_hand():
-            if p == event.pitch:
-                assign_right = True
+        if not assign_left:
+            for p in self.hand_constraints.right_hand():
+                if p == event.pitch:
+                    assign_right = True
+                    self.saved_result.append(('right', 1.0))
 
         if not assign_left and not assign_right:
-            delta_rh = abs(self.right_hand_pos - event.pitch)
-            delta_lh = abs(self.left_hand_pos - event.pitch)
+            delta_rh = abs(self.right_hand_pos - event.pitch) / math.sqrt(self.right_hand_variance)
+            delta_lh = abs(self.left_hand_pos - event.pitch) / math.sqrt(self.left_hand_variance)
             assign_right = delta_lh > delta_rh
             assign_left = not assign_right
+
+            if assign_left:
+                normal = scipy.stats.norm(self.left_hand_pos, math.sqrt(self.left_hand_variance))
+                p = normal.pdf(event.pitch)
+                assert p <= 1
+                self.saved_result.append(('left', p))
+            else:
+                normal = scipy.stats.norm(self.right_hand_pos, math.sqrt(self.right_hand_variance))
+                p = normal.pdf(event.pitch)
+                assert p <= 1
+                self.saved_result.append(('right', p))
             self.last_was_left_hand = assign_left
 
         if assign_left:
@@ -167,9 +184,9 @@ class KalmanMapper(object):
                 self.left_hand_variance += delta * variance_per_second
 
             self.left_hand_pos += self.left_hand_variance / (self.left_hand_variance + midi_variance) * (
-                        event.pitch - self.left_hand_pos)
+                    event.pitch - self.left_hand_pos)
             self.left_hand_variance -= self.left_hand_variance / (
-                        self.left_hand_variance + midi_variance) * self.left_hand_variance
+                    self.left_hand_variance + midi_variance) * self.left_hand_variance
             self.time_last_lh = event.when
             self.last_was_left_hand = True
 
@@ -179,9 +196,9 @@ class KalmanMapper(object):
                 self.right_hand_variance += delta * variance_per_second
 
             self.right_hand_pos += self.right_hand_variance / (self.right_hand_variance + midi_variance) * (
-                        event.pitch - self.right_hand_pos)
+                    event.pitch - self.right_hand_pos)
             self.right_hand_variance -= self.right_hand_variance / (
-                        self.right_hand_variance + midi_variance) * self.right_hand_variance
+                    self.right_hand_variance + midi_variance) * self.right_hand_variance
             self.time_last_rh = event.when
             self.last_was_left_hand = False
 
@@ -203,18 +220,79 @@ def evaluate_all(data):
     print(out_str)
 
 
+def note_off_mapping(events):
+    note_on_idx = -1
+    note_off_idx = 0
+    result = []
+    idx = 0
+    while idx < len(events):
+        if not events[idx].is_note_on:
+            note_off_idx += 1
+        if events[idx].is_note_on:
+            note_on_idx += 1
+            pitch = events[idx].pitch
+            search_idx = idx + 1
+            skipped_offs = 0
+            while search_idx < len(events):
+                if not events[search_idx].is_note_on and events[search_idx].pitch != pitch:
+                    skipped_offs += 1
+                elif not events[search_idx].is_note_on and events[search_idx].pitch == pitch:
+                    result.append(note_off_idx + skipped_offs)
+                    break
+                search_idx += 1
+            else:
+                raise Exception('malformed')
+
+        idx += 1
+
+    return result
+
+
 def evaluate_piece(data, key):
     print(key)
-    mapper = KalmanMapper()
+    forward_mapper = KalmanMapper()
+    backward_mapper = KalmanMapper()
     correct_notes = 0
     wrong_notes = 0
     for event in data[key]:
-        mapper.midi_event(event)
-        if event.is_note_on:
-            if mapper.last_was_left_hand == event.is_left:
-                correct_notes += 1
-            else:
-                wrong_notes += 1
+        forward_mapper.midi_event(event)
+        # if event.is_note_on:
+        #     if forward_mapper.last_was_left_hand == event.is_left:
+        #         correct_notes += 1
+        #     else:
+        #         wrong_notes += 1
+
+    start_time = data[key][-1].when
+    for event in reversed(data[key]):
+        event = MidiEvent(event.pitch, not event.is_note_on, start_time - event.when, event.is_left)
+        backward_mapper.midi_event(event)
+        # if event.is_note_on:
+        #     if backward_mapper.last_was_left_hand == event.is_left:
+        #         correct_notes += 1
+        #     else:
+        #         wrong_notes += 1
+
+    result_forward = forward_mapper.saved_result
+    result_backward = list(reversed(backward_mapper.saved_result))
+    note_off_indices = note_off_mapping(data[key])
+    idx = 0
+    for event in data[key]:
+        if not event.is_note_on: continue
+
+        res1 = result_forward[idx]
+        res2 = result_backward[note_off_indices[idx]]
+        if res1[1] >= res2[1]:
+            predicted_is_left = res1[0] == 'left'
+        else:
+            predicted_is_left = res2[0] == 'left'
+
+        if predicted_is_left == event.is_left:
+            correct_notes += 1
+        else:
+            wrong_notes += 1
+
+        idx += 1
+
     accuracy = correct_notes / (correct_notes + wrong_notes) * 100.0
     print(f'Accuracy = {accuracy:.1f}% ({correct_notes} / {correct_notes + wrong_notes})')
     print()
