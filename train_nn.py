@@ -14,15 +14,13 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 import hannds_data as hd
+from network_zoo import Network88, Network88Tanh
 
 # global vars
-g_debug = None
 g_time = dt.datetime.now().strftime('%m-%d-%H%M')
 
 
 def main():
-    global g_debug
-
     parser = argparse.ArgumentParser(description='Learn hannds neural net')
     parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
     parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
@@ -32,15 +30,28 @@ def main():
     parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
     parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
                         help='the partition index (from 1 to 10) for 10-fold cross validation')
+    parser.add_argument('--network', metavar='NET', type=str, default='88',
+                        help='which network to train. Use "88" or "88Tanh"')
 
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
     print(f"Using {device}", flush=True)
-    g_debug = args.debug
 
-    train_data, valid_data, _ = \
-        hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args.cv_partition, debug=args.debug)
-    trainer = Trainer(train_data, valid_data, args, device)
+    if args.network == '88Tanh':
+        train_data, valid_data, _ = \
+            hd.train_valid_test_data_windowed_tanh(len_train_sequence=100, cv_partition=args.cv_partition, debug=args.debug)
+        num_features = train_data.len_features()
+        model = Network88Tanh(args.hidden_size, args.layers, args.bidirectional, num_features).to(device)
+    elif args.network == '88':
+        train_data, valid_data, _ = \
+            hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args.cv_partition,
+                                              debug=args.debug)
+        num_features = train_data.len_features()
+        num_categories = train_data.num_categories()
+        model = Network88(args.hidden_size, args.layers, args.bidirectional, num_features, num_categories).to(device)
+
+    trainer = Trainer(model, train_data, valid_data, args, device)
+
     trainer.run()
     model = trainer.model
     if not os.path.exists('models'):
@@ -56,31 +67,8 @@ def main():
         json.dump(desc, file, indent=4)
 
 
-class Network88(nn.Module):
-    def __init__(self, hidden_size, n_layers, bidirectional, n_features, n_categories):
-        super(Network88, self).__init__()
-        self.lstm = nn.LSTM(input_size=n_features, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
-                            dropout=0.5, bidirectional=bidirectional)
-        self.n_directions = 2 if bidirectional else 1
-        self.out_linear = nn.Linear(hidden_size * self.n_directions, n_features * n_categories)
-        self.n_layers = n_layers
-        self.n_features = n_features
-        self.n_categories = n_categories
-
-    def forward(self, input, h_prev=None, c_prev=None):
-        hidden_in = (h_prev, c_prev) if h_prev is not None else None
-        lstm_output, (h_n, c_n) = self.lstm.forward(input, hidden_in)
-        output = self.out_linear(lstm_output)
-        output = output.view(-1, output.shape[1], self.n_features, self.n_categories)
-        # Residual connection
-        # output[:, :, :, 0] += 1.0 - input
-        # output[:, :, :, 1] += input
-        # output[:, :, :, 2] += input
-        return output, h_n, c_n
-
-
 class Trainer(object):
-    def __init__(self, train_data, valid_data, args, device):
+    def __init__(self, model, train_data, valid_data, args, device):
         self.n_epochs = 50
         self.batch_size_train = 10
         self.layers = args.layers
@@ -92,11 +80,7 @@ class Trainer(object):
             'train': DataLoader(train_data, batch_size=self.batch_size_train, sampler=sampler_train, drop_last=True),
             'valid': DataLoader(valid_data, batch_size=self.batch_size_train)
         }
-        num_features = train_data.len_features()
-        num_categories = train_data.num_categories()
-        self.model = Network88(self.hidden_size, self.layers, self.bidirectional, num_features, num_categories).to(device)
-        self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
+        self.model = model
         self.device = device
 
         bi_str = '-bidirectional' if self.bidirectional else ''
@@ -114,6 +98,7 @@ class Trainer(object):
         return h_0, c_0
 
     def run(self):
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
         best_accuracy = 0.0
         final_model = None
 
@@ -125,32 +110,21 @@ class Trainer(object):
                 h_n, c_n = self.zero_state(phase)
                 phase_loss = (0.0, 0)
                 valid_accuracy = (0.0, 0)
-                valid_accuracy_plain = (0.0, 0)
                 self.model = self.model.train(phase == 'train')
 
                 for batch_idx, (X_batch, Y_batch) in enumerate(self.data[phase]):
                     with torch.set_grad_enabled(phase == 'train'):
                         X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
-                        self.optimizer.zero_grad()
+                        optimizer.zero_grad()
                         output, h_n, c_n = self.model(X_batch, h_n, c_n)
-                        train_loss = self.criterion(output.view((-1, self.model.n_categories)), Y_batch.view(-1))
+                        train_loss = self.model.compute_loss(output, Y_batch)
                         if phase == 'train':
                             train_loss.backward()
-                            self.optimizer.step()
+                            optimizer.step()
                         else:
-                            predicted_classes = torch.argmax(output, dim=3)
-                            filter_func = causal_filter
-                            X_numpy = X_batch.squeeze().cpu().numpy()
-                            Y_numpy = Y_batch.squeeze().cpu().numpy()
-                            classes_numpy = predicted_classes.squeeze().cpu().numpy()
-
-                            va1 = valid_accuracy[0] + compute_accuracy(X_numpy, Y_numpy, classes_numpy, filter_func)
-                            va2 = valid_accuracy[1] + 1
-                            valid_accuracy = (va1, va2)
-
-                            va1 = valid_accuracy_plain[0] + compute_accuracy(X_numpy, Y_numpy, classes_numpy)
-                            va2 = valid_accuracy_plain[1] + 1
-                            valid_accuracy_plain = (va1, va2)
+                            va0 = valid_accuracy[0] + self.model.compute_accuracy(X_batch, Y_batch, output)
+                            va1 = valid_accuracy[1] + 1
+                            valid_accuracy = (va0, va1)
 
                         h_n = h_n.detach()
                         c_n = c_n.detach()
@@ -168,7 +142,7 @@ class Trainer(object):
                 best_accuracy = valid_accuracy[0] / valid_accuracy[1]
                 final_model = copy.deepcopy(self.model)
                 print('*')
-            self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy, valid_accuracy_plain)
+            self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
 
         self.model = final_model
         plot_output(torch.softmax(output[0], dim=-1))
@@ -182,33 +156,15 @@ class Trainer(object):
         else:
             self.writer.add_scalar('accuracy', valid_accuracy[0] / valid_accuracy[1], epoch)
 
-    def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy, valid_accuracy_plain):
+    def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy):
         filtered_acc = valid_accuracy[0] / valid_accuracy[1]
-        unfiltered_acc = valid_accuracy_plain[0] / valid_accuracy_plain[1]
         print(f'Epoch: {epoch}/{self.n_epochs - 1}, {t_total:.1f}sec')
         print('-' * 21)
         print(f'Train loss = {avg_loss["train"]:.6f}')
         print(f'Valid loss = {avg_loss["valid"]:.6f}')
-        print(f'Accuracy   = {filtered_acc:.1f}({unfiltered_acc:.1f})%', flush=True)
+        print(f'Accuracy   = {filtered_acc:.1f}%', flush=True)
         print()
         print(flush=True)
-
-
-def compute_accuracy(X, Y, predicted_classes, filter_func=lambda x: x):
-    assert len(X.shape) == len(Y.shape) == len(predicted_classes.shape) == 2
-    n_notes = X.sum()
-    predicted_classes = filter_func(predicted_classes)
-    pred_lh = predicted_classes == hd.WINDOWED_LEFT_HAND_LABEL
-    pred_rh = predicted_classes == hd.WINDOWED_RIGHT_HAND_LABEL
-    label_lh = Y == hd.WINDOWED_LEFT_HAND_LABEL
-    label_rh = Y == hd.WINDOWED_RIGHT_HAND_LABEL
-    n_lh_correct = (pred_lh * label_lh).sum()
-    n_rh_correct = (pred_rh * label_rh).sum()
-    assert n_lh_correct <= n_notes
-    assert n_rh_correct <= n_notes
-    n_correct = n_lh_correct + n_rh_correct
-    assert n_correct <= n_notes
-    return n_correct / n_notes * 100.0
 
 
 def plot_output(output, max_pages=32):
@@ -221,52 +177,6 @@ def plot_output(output, max_pages=32):
                 ax.imshow(image, cmap='bwr', origin='lower', vmin=-1, vmax=1)
                 pdf.savefig(fig)
                 plt.close()
-
-
-def causal_filter(predicted_classes):
-    """
-    Filters the predicted classes: the assignment is decided at the
-    note-on event. Changes the content of predicted_classes.
-    """
-    predicted_classes = predicted_classes.copy()
-    for row in range(1, predicted_classes.shape[0]):
-        last_line = predicted_classes[row - 1]
-        current_line = predicted_classes[row]
-        both_note_on = np.logical_and(current_line != hd.WINDOWED_NOT_PLAYED_LABEL, last_line != hd.WINDOWED_NOT_PLAYED_LABEL)
-        predicted_classes[row, both_note_on] = last_line[both_note_on]
-
-    return predicted_classes
-
-
-def majority_filter(predicted_classes):  # Needs to be profiled
-    """
-    Filters the predicted classes: the assignment is decided at the
-    note-off event. Changes the content of predicted_classes.
-    """
-    predicted_classes = predicted_classes.copy()
-    for column in range(predicted_classes.shape[1]):
-        row = 0
-        while row < predicted_classes.shape[0]:
-            last_note = predicted_classes[row - 1, column] if row > 0 else 0
-            current_note = predicted_classes[row, column]
-            start = row
-            if last_note == hd.WINDOWED_NOT_PLAYED_LABEL and current_note != hd.WINDOWED_NOT_PLAYED_LABEL:
-                row += 1
-                while row < predicted_classes.shape[0]:
-                    current_note = predicted_classes[row, column]
-                    if current_note == hd.WINDOWED_NOT_PLAYED_LABEL or row == predicted_classes.shape[0] - 1:
-                        end = row
-                        c = Counter(predicted_classes[start: end, column])
-                        majority_value, _ = c.most_common()[0]
-                        predicted_classes[start: end, column] = majority_value
-                        row += 1
-                        break
-                    else:
-                        row += 1
-            else:
-                row += 1
-
-    return predicted_classes
 
 
 if __name__ == '__main__':

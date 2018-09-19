@@ -20,6 +20,16 @@ def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=Fal
     return train_data, valid_data, test_data
 
 
+def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debug=False):
+    make_npz_files(overwrite=False, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
+    all_files = hannds_files.TrainValidTestFiles()
+    all_files.read_files_from_dir(cv_partition)
+    train_data = HanndsDataset(all_files.train_files, 'windowed_tanh', len_sequence=len_train_sequence, debug=debug)
+    valid_data = HanndsDataset(all_files.valid_files, 'windowed_tanh', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(all_files.test_files, 'windowed_tanh', len_sequence=-1, debug=debug)
+    return train_data, valid_data, test_data
+
+
 def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False):
     make_npz_files(overwrite=False, subdir='event', convert_func=convert_event)
     all_files = hannds_files.TrainValidTestFiles()
@@ -30,9 +40,13 @@ def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False)
     return train_data, valid_data, test_data
 
 
-WINDOWED_NOT_PLAYED_LABEL = 0
-WINDOWED_LEFT_HAND_LABEL = 1
-WINDOWED_RIGHT_HAND_LABEL = 2
+WINDOWED_NOT_PLAYED = 0
+WINDOWED_LEFT_HAND = 1
+WINDOWED_RIGHT_HAND = 2
+
+WINDOWED_TANH_LEFT_HAND = -1
+WINDOWED_TANH_RIGHT_HAND = +1
+WINDOWED_TANH_NOT_PLAYED = 0
 
 
 def make_npz_files(overwrite, subdir, convert_func):
@@ -75,11 +89,18 @@ def convert_windowed(midi):
         data[:, 1, :]
     )
 
-    Y = np.zeros((batch_size, 88))  # == WINDOWED_NOT_PLAYED_LABEL
-    Y[data[:, 0, :]] = WINDOWED_LEFT_HAND_LABEL
-    Y[data[:, 1, :]] = WINDOWED_RIGHT_HAND_LABEL
+    Y = np.full((batch_size, 88), WINDOWED_NOT_PLAYED)
+    Y[data[:, 0, :]] = WINDOWED_LEFT_HAND
+    Y[data[:, 1, :]] = WINDOWED_RIGHT_HAND
 
     return X.astype(np.float32), Y.astype(np.longlong)
+
+
+def convert_windowed_tanh(midi):
+    X, Y = convert_windowed(midi)
+    Y[Y == WINDOWED_LEFT_HAND] = WINDOWED_TANH_LEFT_HAND
+    Y[Y == WINDOWED_RIGHT_HAND] = WINDOWED_TANH_RIGHT_HAND
+    return X, Y.astype(np.float32)
 
 
 def convert_event(midi):
@@ -190,6 +211,9 @@ class ContinuationSampler(Sampler):
 def main():
     print('Making windowed')
     make_npz_files(overwrite=True, subdir='windowed', convert_func=convert_windowed)
+    print()
+    print('Making windowed_tanh')
+    make_npz_files(overwrite=True, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
     print()
     print('Making event')
     make_npz_files(overwrite=True, subdir='event', convert_func=convert_event)
