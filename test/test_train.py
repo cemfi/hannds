@@ -1,6 +1,6 @@
 import numpy as np
 
-from train_nn import *
+from network_zoo import *
 
 
 def test_filter_noaction():
