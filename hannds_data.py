@@ -1,3 +1,5 @@
+"""Provides training, validation and test data."""
+
 import math
 from collections import namedtuple
 import os
@@ -139,15 +141,15 @@ def convert_event(midi):
 
 
 class HanndsDataset(Dataset):
-    """
-    Provides the Hannds dataset as sequences of size len_sequence.
-    If len_sequenc == -1, it provides a single sequence of maximal
-    length.
-    """
+    """Provides the Hannds dataset."""
 
     XY = namedtuple('XY', ['X', 'Y'])
 
     def __init__(self, midi_files, subdir, len_sequence, debug):
+        """
+        Provides sequences of size len_sequence. If len_sequenc == -1, it
+        provides a single sequence of maximal length.
+        """
         self.len_sequence = len_sequence
         npz_files = hannds_files.npz_files_for_midi(midi_files, subdir)
         if debug:

@@ -1,3 +1,8 @@
+"""
+Collection of different neural network architectures together with
+architecture-specific helper functions.
+"""
+
 from collections import Counter
 
 from torch import nn

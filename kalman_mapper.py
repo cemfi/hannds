@@ -1,3 +1,5 @@
+"""Kalman filter based hand mapping."""
+
 import os
 from collections import namedtuple
 import math

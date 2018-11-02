@@ -1,3 +1,5 @@
+"""Organizes training, validation and test files. Mainly used by hannds_data.py."""
+
 import math
 import os
 import glob

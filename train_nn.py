@@ -1,3 +1,5 @@
+"""Trains a neural network for hand mapping."""
+
 import argparse
 import copy
 import datetime as dt

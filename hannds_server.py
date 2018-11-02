@@ -1,3 +1,5 @@
+"""Provides a hand mapping service by receiving, processing and sending OSC."""
+
 import argparse
 import datetime as dt
 
