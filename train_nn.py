@@ -1,5 +1,4 @@
 import argparse
-from collections import Counter
 import copy
 import datetime as dt
 import json
@@ -7,10 +6,8 @@ import os
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-import numpy as np
 from tensorboardX import SummaryWriter
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
 import hannds_data as hd
@@ -20,35 +17,26 @@ from network_zoo import Network88, Network88Tanh
 g_time = dt.datetime.now().strftime('%m-%d-%H%M')
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Learn hannds neural net')
-    parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
-    parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
-    parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length used in training')
-    parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
-    parser.add_argument('--bidirectional', action='store_true', required=False, help='use a bi-directional LSTM')
-    parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
-    parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
-                        help='the partition index (from 1 to 10) for 10-fold cross validation')
-    parser.add_argument('--network', metavar='NET', type=str, default='88',
-                        help='which network to train. Use "88" or "88Tanh"')
-
-    args = parser.parse_args()
-    device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
+def main(args):
+    device = torch.device('cuda' if torch.cuda.is_available() and args['cuda'] else 'cpu')
     print(f"Using {device}", flush=True)
 
-    if args.network == '88Tanh':
+    if args['network'] == '88Tanh':
         train_data, valid_data, _ = \
-            hd.train_valid_test_data_windowed_tanh(len_train_sequence=100, cv_partition=args.cv_partition, debug=args.debug)
+            hd.train_valid_test_data_windowed_tanh(len_train_sequence=100, cv_partition=args['cv_partition'],
+                                                   debug=args['debug'])
         num_features = train_data.len_features()
-        model = Network88Tanh(args.hidden_size, args.layers, args.bidirectional, num_features).to(device)
-    elif args.network == '88':
+        model = Network88Tanh(args['hidden_size'], args['layers'], args['bidirectional'], num_features).to(device)
+    elif args['network'] == '88':
         train_data, valid_data, _ = \
-            hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args.cv_partition,
-                                              debug=args.debug)
+            hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args['cv_partition'],
+                                              debug=args['debug'])
         num_features = train_data.len_features()
         num_categories = train_data.num_categories()
-        model = Network88(args.hidden_size, args.layers, args.bidirectional, num_features, num_categories).to(device)
+        model = Network88(args['hidden_size'], args['layers'], args['bidirectional'],
+                          num_features, num_categories).to(device)
+    else:
+        raise Exception('Invalid --network argument')
 
     trainer = Trainer(model, train_data, valid_data, args, device)
 
@@ -57,11 +45,11 @@ def main():
     if not os.path.exists('models'):
         os.mkdir('models')
 
-    directory = f'models/{g_time}-p{os.getpid()}'
+    directory = f'models/{g_time}'
     os.mkdir(directory)
-    torch.save(model, directory + '/model.pt')
+    torch.save(model, os.path.join(directory, 'model.pt'))
     desc = {
-        'args': vars(args)
+        'args': args
     }
     with open(directory + '/desc.json', 'w') as file:
         json.dump(desc, file, indent=4)
@@ -71,9 +59,9 @@ class Trainer(object):
     def __init__(self, model, train_data, valid_data, args, device):
         self.n_epochs = 50
         self.batch_size_train = 10
-        self.layers = args.layers
-        self.hidden_size = args.hidden_size
-        self.bidirectional = args.bidirectional
+        self.layers = args['layers']
+        self.hidden_size = args['hidden_size']
+        self.bidirectional = args['bidirectional']
 
         sampler_train = hd.ContinuationSampler(len(train_data), self.batch_size_train)
         self.data = {
@@ -84,7 +72,7 @@ class Trainer(object):
         self.device = device
 
         bi_str = '-bidirectional' if self.bidirectional else ''
-        desc = f"hidden{args.hidden_size}_layers{args.layers}{bi_str}"
+        desc = f"hidden{args['hidden_size']}_layers{args['layers']}{bi_str}"
         self.writer = SummaryWriter(f'runs/{g_time}-p{os.getpid()}-{desc}')
 
     def zero_state(self, phase):
@@ -145,7 +133,7 @@ class Trainer(object):
             self._print_epoch_stats(epoch, t_total, avg_loss, valid_accuracy)
 
         self.model = final_model
-        plot_output(torch.softmax(output[0], dim=-1))
+        # plot_output(torch.softmax(output[0], dim=-1))
 
     def _save_summaries(self, avg_loss, epoch, phase, valid_accuracy):
         self.writer.add_scalar('loss/' + phase, avg_loss[phase], epoch)
@@ -180,4 +168,16 @@ def plot_output(output, max_pages=32):
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Learn hannds neural net')
+    parser.add_argument('--hidden_size', metavar='N', type=int, required=True, help='number of hidden units per layer')
+    parser.add_argument('--layers', metavar='N', type=int, required=True, help='numbers of layers')
+    parser.add_argument('--length', metavar='N', type=int, required=True, help='sequence length used in training')
+    parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
+    parser.add_argument('--bidirectional', action='store_true', required=False, help='use a bi-directional LSTM')
+    parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
+    parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
+                        help='the partition index (from 1 to 10) for 10-fold cross validation')
+    parser.add_argument('--network', metavar='NET', type=str, default='88',
+                        help='which network to train. Use "88" or "88Tanh"')
+    args = parser.parse_args()
+    main(vars(args))
