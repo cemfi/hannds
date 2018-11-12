@@ -13,6 +13,8 @@ import hannds_files
 
 
 def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=False):
+    """Training, validation and test data in the categorical windowed format"""
+
     make_npz_files(overwrite=False, subdir='windowed', convert_func=convert_windowed)
     all_files = hannds_files.TrainValidTestFiles()
     all_files.read_files_from_dir(cv_partition)
@@ -23,6 +25,8 @@ def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=Fal
 
 
 def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debug=False):
+    """Training, validation and test data in the windowed +/-1 format"""
+
     make_npz_files(overwrite=False, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
     all_files = hannds_files.TrainValidTestFiles()
     all_files.read_files_from_dir(cv_partition)
@@ -33,6 +37,8 @@ def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debu
 
 
 def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False):
+    """Training, validation and test data in the MIDI event format"""
+
     make_npz_files(overwrite=False, subdir='event', convert_func=convert_event)
     all_files = hannds_files.TrainValidTestFiles()
     all_files.read_files_from_dir(cv_partition)
@@ -137,19 +143,25 @@ def convert_event(midi):
     events[0, 0] = 0  # Find something more suitable for the first entry
     events[:, 0] = np.maximum(events[:, 0], 0)  # Don't allow negative time deltas (happens at file borders)
 
-    return events[:, :4].astype(np.float32), events[:, 4].astype(np.longlong)
+    Y = events[:, 4].astype(np.float32)
+    return events[:, :4].astype(np.float32), Y
 
 
 class HanndsDataset(Dataset):
-    """Provides the Hannds dataset."""
+    """Provides the Hannds dataset.
+
+    Args:
+        midi_files: list of MIDI files to load
+        subdir: subdir under preprocessed where npz files can be found,
+            e.g. 'event', 'windowed', 'windowed_tanh'
+        len_sequence: produced sequences are len_sequence long.
+            len_sequence == -1 produces single max length sequence
+        debug: load minimal data for faster debugging
+        """
 
     XY = namedtuple('XY', ['X', 'Y'])
 
     def __init__(self, midi_files, subdir, len_sequence, debug):
-        """
-        Provides sequences of size len_sequence. If len_sequenc == -1, it
-        provides a single sequence of maximal length.
-        """
         self.len_sequence = len_sequence
         npz_files = hannds_files.npz_files_for_midi(midi_files, subdir)
         if debug:

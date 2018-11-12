@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import hannds_data as hd
-from network_zoo import Network88, Network88Tanh
+from network_zoo import Network88, Network88Tanh, NetworkMidi
 
 # global vars
 g_time = dt.datetime.now().strftime('%m-%d-%H%M')
@@ -37,6 +37,12 @@ def main(args):
         num_categories = train_data.num_categories()
         model = Network88(args['hidden_size'], args['layers'], args['bidirectional'],
                           num_features, num_categories).to(device)
+    elif args['network'] == 'MIDI':
+        train_data, valid_data, _ = \
+            hd.train_valid_test_data_event(len_train_sequence=100, cv_partition=args['cv_partition'],
+                                           debug=args['debug'])
+        num_features = train_data.len_features()
+        model = NetworkMidi(args['hidden_size'], args['layers']).to(device)
     else:
         raise Exception('Invalid --network argument')
 
@@ -58,6 +64,16 @@ def main(args):
 
 
 class Trainer(object):
+    """Trains a neural network.
+
+    Args:
+        model: the neural network model
+        train_data: the training data
+        valid_data: the validation data
+        args: the command line arguments
+        device: the torch.device where the training is executed
+    """
+
     def __init__(self, model, train_data, valid_data, args, device):
         self.n_epochs = 50
         self.batch_size_train = 10
@@ -72,12 +88,13 @@ class Trainer(object):
         }
         self.model = model
         self.device = device
+        self.network_type = 'gru' if args['network'] == 'MIDI' else 'lstm'
 
         bi_str = '-bidirectional' if self.bidirectional else ''
         desc = f"hidden{args['hidden_size']}_layers{args['layers']}{bi_str}"
         self.writer = SummaryWriter(f'runs/{g_time}-p{os.getpid()}-{desc}')
 
-    def zero_state(self, phase):
+    def zero_state_lstm(self, phase):
         n_directions = self.model.n_directions
         if phase == 'train':
             h_0 = torch.zeros((self.layers * n_directions, self.batch_size_train, self.hidden_size)).to(self.device)
@@ -86,6 +103,13 @@ class Trainer(object):
             h_0 = torch.zeros((self.layers * n_directions, 1, self.hidden_size)).to(self.device)
             c_0 = torch.zeros((self.layers * n_directions, 1, self.hidden_size)).to(self.device)
         return h_0, c_0
+
+    def zero_state_gru(self, phase):
+        if phase == 'train':
+            hidden = torch.zeros((self.layers, self.batch_size_train, self.hidden_size)).to(self.device)
+        else:
+            hidden = torch.zeros((self.layers, 1, self.hidden_size)).to(self.device)
+        return hidden
 
     def run(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0e-3)
@@ -97,7 +121,10 @@ class Trainer(object):
             avg_loss = {'train': 0.0, 'test': 0.0}
 
             for phase in ['train', 'valid']:
-                h_n, c_n = self.zero_state(phase)
+                if self.network_type == 'lstm':
+                    h_n, c_n = self.zero_state_lstm(phase)
+                else:
+                    h_gru = self.zero_state_gru(phase)
                 phase_loss = (0.0, 0)
                 valid_accuracy = (0.0, 0)
                 self.model = self.model.train(phase == 'train')
@@ -106,7 +133,10 @@ class Trainer(object):
                     with torch.set_grad_enabled(phase == 'train'):
                         X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
                         optimizer.zero_grad()
-                        output, h_n, c_n = self.model(X_batch, h_n, c_n)
+                        if self.network_type == 'lstm':
+                            output, h_n, c_n = self.model(X_batch, h_n, c_n)
+                        else:
+                            output, h_gru = self.model(X_batch, h_gru)
                         train_loss = self.model.compute_loss(output, Y_batch)
                         if phase == 'train':
                             train_loss.backward()
@@ -116,11 +146,14 @@ class Trainer(object):
                             va1 = valid_accuracy[1] + 1
                             valid_accuracy = (va0, va1)
 
-                        h_n = h_n.detach()
-                        c_n = c_n.detach()
-                        if self.bidirectional:
-                            h_n[1::2] = 0  # ignore backward state as we are stepping forward from batch to batch
-                            c_n[1::2] = 0
+                        if self.network_type == 'lstm':
+                            h_n = h_n.detach()
+                            c_n = c_n.detach()
+                            if self.bidirectional:
+                                h_n[1::2] = 0  # ignore backward state as we are stepping forward from batch to batch
+                                c_n[1::2] = 0
+                        else:
+                            h_gru = h_gru.detach()
                         phase_loss = (phase_loss[0] + train_loss, phase_loss[1] + 1)
 
                 avg_loss[phase] = phase_loss[0] / phase_loss[1]
@@ -180,6 +213,6 @@ if __name__ == '__main__':
     parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
                         help='the partition index (from 1 to 10) for 10-fold cross validation')
     parser.add_argument('--network', metavar='NET', type=str, default='88',
-                        help='which network to train. Use "88" or "88Tanh"')
+                        help='which network to train. Use "88", "88Tanh" or "MIDI"')
     args = parser.parse_args()
     main(vars(args))

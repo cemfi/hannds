@@ -1,3 +1,5 @@
+"""Tests for kalman_mapper.py"""
+
 from kalman_mapper import MidiEvent, KalmanMapper, HandConstraints
 import kalman_mapper
 
