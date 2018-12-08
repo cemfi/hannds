@@ -105,6 +105,30 @@ class NetworkMidi(nn.Module):
         return num_correct / num_events * 100.0
 
 
+class NetworkMagenta(nn.Module):
+    def __init__(self, hidden_size, num_layers):
+        super(NetworkMagenta, self).__init__()
+        self.gru = nn.GRU(input_size=388, hidden_size=hidden_size, num_layers=num_layers, dropout=0.5, batch_first=True)
+        self.linear = nn.Linear(hidden_size, out_features=1)
+        self.n_directions = 1
+        self.criterion = nn.BCEWithLogitsLoss()
+
+    def forward(self, input, hidden):
+        out, hidden_tmp = self.gru(input, hidden)
+        out = self.linear(out)
+        return out, hidden_tmp
+
+    def compute_loss(self, output, labels):
+        return self.criterion(output.view(-1), labels.view(-1))
+
+    def compute_accuracy(self, X_batch, Y_batch, prediction):
+        labels_flat = Y_batch.view(-1)
+        prediction_flat = (torch.sigmoid(prediction.view(-1)) >= 0.5).float()
+        num_events = float(labels_flat.shape[0])
+        num_correct = float(torch.sum(labels_flat == prediction_flat))
+        return num_correct / num_events * 100.0
+
+
 def causal_filter(predicted_classes, label_not_played=0):
     """
     Filters the predicted classes: the assignment is decided at the

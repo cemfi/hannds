@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import hannds_data as hd
-from network_zoo import Network88, Network88Tanh, NetworkMidi
+from network_zoo import Network88, Network88Tanh, NetworkMidi, NetworkMagenta
 
 # global vars
 g_time = dt.datetime.now().strftime('%m-%d-%H%M')
@@ -41,8 +41,13 @@ def main(args):
         train_data, valid_data, _ = \
             hd.train_valid_test_data_event(len_train_sequence=100, cv_partition=args['cv_partition'],
                                            debug=args['debug'])
-        num_features = train_data.len_features()
         model = NetworkMidi(args['hidden_size'], args['layers']).to(device)
+    elif args['network'] == 'Magenta':
+        train_data, valid_data, _ = \
+            hd.train_valid_test_data_magenta(len_train_sequence=100, cv_partition=args['cv_partition'],
+                                           debug=args['debug'])
+        model = NetworkMagenta(args['hidden_size'], args['layers']).to(device)
+
     else:
         raise Exception('Invalid --network argument')
 
@@ -88,7 +93,7 @@ class Trainer(object):
         }
         self.model = model
         self.device = device
-        self.network_type = 'gru' if args['network'] == 'MIDI' else 'lstm'
+        self.network_type = 'gru' if args['network'] == 'MIDI' or args['network'] == 'Magenta' else 'lstm'
 
         bi_str = '-bidirectional' if self.bidirectional else ''
         desc = f"hidden{args['hidden_size']}_layers{args['layers']}{bi_str}"
@@ -118,7 +123,7 @@ class Trainer(object):
 
         for epoch in range(self.n_epochs):
             start_ts = dt.datetime.now()
-            avg_loss = {'train': 0.0, 'test': 0.0}
+            avg_loss = {'train': 0.0, 'test2': 0.0}
 
             for phase in ['train', 'valid']:
                 if self.network_type == 'lstm':

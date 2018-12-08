@@ -1,4 +1,4 @@
-"""Provides training, validation and test data."""
+"""Provides training, validation and test2 data."""
 
 import math
 from collections import namedtuple
@@ -13,7 +13,7 @@ import hannds_files
 
 
 def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test data in the categorical windowed format"""
+    """Training, validation and test2 data in the categorical windowed format"""
 
     make_npz_files(overwrite=False, subdir='windowed', convert_func=convert_windowed)
     all_files = hannds_files.TrainValidTestFiles()
@@ -25,7 +25,7 @@ def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=Fal
 
 
 def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test data in the windowed +/-1 format"""
+    """Training, validation and test2 data in the windowed +/-1 format"""
 
     make_npz_files(overwrite=False, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
     all_files = hannds_files.TrainValidTestFiles()
@@ -37,7 +37,7 @@ def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debu
 
 
 def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test data in the MIDI event format"""
+    """Training, validation and test2 data in the MIDI event format"""
 
     make_npz_files(overwrite=False, subdir='event', convert_func=convert_event)
     all_files = hannds_files.TrainValidTestFiles()
@@ -45,6 +45,18 @@ def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False)
     train_data = HanndsDataset(all_files.train_files, 'event', len_sequence=len_train_sequence, debug=debug)
     valid_data = HanndsDataset(all_files.valid_files, 'event', len_sequence=-1, debug=debug)
     test_data = HanndsDataset(all_files.test_files, 'event', len_sequence=-1, debug=debug)
+    return train_data, valid_data, test_data
+
+
+def train_valid_test_data_magenta(len_train_sequence, cv_partition=1, debug=False):
+    """Training, validation and test2 data in the magenta project's MIDI event format for Performance RNN"""
+
+    make_npz_files(overwrite=False, subdir='magenta', convert_func=convert_magenta)
+    all_files = hannds_files.TrainValidTestFiles()
+    all_files.read_files_from_dir(cv_partition)
+    train_data = HanndsDataset(all_files.train_files, 'magenta', len_sequence=len_train_sequence, debug=debug)
+    valid_data = HanndsDataset(all_files.valid_files, 'magenta', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(all_files.test_files, 'magenta', len_sequence=-1, debug=debug)
     return train_data, valid_data, test_data
 
 
@@ -116,8 +128,8 @@ def convert_event(midi):
     for instrument in midi.instruments:
         num_notes += len(instrument.notes)
 
-    # # Generate empty numpy array
-    events = np.empty((2 * num_notes, 1 + 1 + 3))
+    # Generate empty numpy array
+    events = np.empty((2 * num_notes, 5))
 
     # Generate event list
     # Format:[    0    ,        1      ,     2   ,    3  ,     4     ]
@@ -140,11 +152,50 @@ def convert_event(midi):
     # Compute timestamp deltas
     events = events[events[:, 0].argsort()]  # Sort by column 0
     events[1:, 0] = np.diff(events[:, 0])
-    events[0, 0] = 0  # Find something more suitable for the first entry
+    events[0, 0] = 0  # Something suitable for the first entry
     events[:, 0] = np.maximum(events[:, 0], 0)  # Don't allow negative time deltas (happens at file borders)
 
     Y = events[:, 4].astype(np.float32)
     return events[:, :4].astype(np.float32), Y
+
+
+def convert_magenta(midi):
+    num_notes = 0
+    for instrument in midi.instruments:
+        num_notes += len(instrument.notes)
+
+    # Generate empty numpy array
+    events = np.zeros((2 * num_notes, 128 + 128 + 100 + 32 + 2))
+    # Format:[ 0-127 ,  128-255,    256-355,  356-387,  388,      389     ]
+    #        [note on, note off, time-shift, velocity, hand, absolute time]
+
+    i = 0
+    for hand, instrument in enumerate(midi.instruments):
+        notes = instrument.notes
+        for note in notes:
+            velocity_0_to_32 = note.velocity // 4
+            events[i, note.pitch] = 1 # Note on
+            events[i, -1] = note.start # Timestamp note on
+            events[i + 1, note.pitch + 128] = 1 # Note off
+            events[i+ 1, -1] = note.end # Timestamp note off
+            events[i:i + 2, 356 + velocity_0_to_32] = 1 # Set velocity
+            events[i:i + 2, -2] = hand
+
+            i += 2
+
+    events = events[events[:, -1].argsort()]  # Sort by timestamp (last column)
+    delta_time = np.diff(events[:, -1])
+    delta_time = np.clip(delta_time, 0.01, 10.0)
+    delta_time = (delta_time - 0.01) / (10.0 - 0.01) * 99.5
+    delta_time = delta_time.astype(np.int)
+
+    events[0, 355] = 1 # Assume ten seconds silence before first note is played
+    for i in range(1, len(events)):
+        events[i, 256 + delta_time[i - 1]] = 1
+
+    Y = events[:, -2].astype(np.float32)
+    return events[:, :-2].astype(np.float32), Y
+
 
 
 class HanndsDataset(Dataset):
@@ -223,6 +274,8 @@ class ContinuationSampler(Sampler):
 
 
 def main():
+    print('Making magenta')
+    make_npz_files(overwrite=True, subdir='magenta', convert_func=convert_magenta)
     print('Making windowed')
     make_npz_files(overwrite=True, subdir='windowed', convert_func=convert_windowed)
     print()
