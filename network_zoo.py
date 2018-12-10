@@ -13,10 +13,10 @@ import hannds_data as hd
 
 
 class Network88(nn.Module):
-    def __init__(self, hidden_size, n_layers, bidirectional, n_features, n_categories):
+    def __init__(self, hidden_size, n_layers, bidirectional, n_features, n_categories, rnn_type):
         super(Network88, self).__init__()
-        self.lstm = nn.LSTM(input_size=n_features, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
-                            dropout=0.5, bidirectional=bidirectional)
+        self.rnn = _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional)
+
         self.n_directions = 2 if bidirectional else 1
         self.out_linear = nn.Linear(hidden_size * self.n_directions, n_features * n_categories)
         self.n_layers = n_layers
@@ -24,16 +24,15 @@ class Network88(nn.Module):
         self.n_categories = n_categories
         self.criterion = nn.CrossEntropyLoss()
 
-    def forward(self, input, h_prev=None, c_prev=None):
-        hidden_in = (h_prev, c_prev) if h_prev is not None else None
-        lstm_output, (h_n, c_n) = self.lstm.forward(input, hidden_in)
-        output = self.out_linear(lstm_output)
+    def forward(self, input, hidden_in):
+        rnn_output, hidden_out = self.rnn.forward(input, hidden_in)
+        output = self.out_linear(rnn_output)
         output = output.view(-1, output.shape[1], self.n_features, self.n_categories)
         # Residual connection
         # output[:, :, :, 0] += 1.0 - input
         # output[:, :, :, 1] += input
         # output[:, :, :, 2] += input
-        return output, h_n, c_n
+        return output, hidden_out
 
     def compute_loss(self, output, labels):
         return self.criterion(output.view((-1, self.n_categories)), labels.view(-1))
@@ -51,21 +50,20 @@ class Network88(nn.Module):
 
 
 class Network88Tanh(nn.Module):
-    def __init__(self, hidden_size, n_layers, bidirectional, n_features):
+    def __init__(self, hidden_size, n_layers, bidirectional, n_features, rnn_type):
         super(Network88Tanh, self).__init__()
-        self.lstm = nn.LSTM(input_size=88, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
-                            dropout=0.5, bidirectional=bidirectional)
+        self.rnn = _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional)
         self.n_directions = 2 if bidirectional else 1
         self.out_linear = nn.Linear(hidden_size * self.n_directions, n_features)
         self.n_layers = n_layers
         self.criterion = nn.MSELoss()
 
-    def forward(self, input, h_prev, c_prev):
-        lstm_output, (h_n, c_n) = self.lstm.forward(input, (h_prev, c_prev))
-        output = self.out_linear(lstm_output)
+    def forward(self, input, hidden_in):
+        rnn_output, hidden_out = self.rnn.forward(input, hidden_in)
+        output = self.out_linear(rnn_output)
         output = torch.tanh(output)
         output = output * input
-        return output, h_n, c_n
+        return output, hidden_out
 
     def compute_loss(self, output, labels):
         return self.criterion(output, labels)
@@ -82,17 +80,18 @@ class Network88Tanh(nn.Module):
 
 
 class NetworkMidi(nn.Module):
-    def __init__(self, hidden_size, num_layers):
+    def __init__(self, hidden_size, n_layers, rnn_type):
         super(NetworkMidi, self).__init__()
-        self.gru = nn.GRU(input_size=4, hidden_size=hidden_size, num_layers=num_layers, dropout=0.5, batch_first=True)
+        n_features = 4
+        self.rnn = _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional=False)
         self.linear = nn.Linear(hidden_size, out_features=1)
         self.n_directions = 1
         self.criterion = nn.BCEWithLogitsLoss()
 
-    def forward(self, input, hidden):
-        out, hidden_tmp = self.gru(input, hidden)
+    def forward(self, input, hidden_in):
+        out, hidden_out = self.rnn(input, hidden_in)
         out = self.linear(out)
-        return out, hidden_tmp
+        return out, hidden_out
 
     def compute_loss(self, output, labels):
         return self.criterion(output.view(-1), labels.view(-1))
@@ -106,17 +105,18 @@ class NetworkMidi(nn.Module):
 
 
 class NetworkMagenta(nn.Module):
-    def __init__(self, hidden_size, num_layers):
+    def __init__(self, hidden_size, n_layers, rnn_type):
         super(NetworkMagenta, self).__init__()
-        self.gru = nn.GRU(input_size=388, hidden_size=hidden_size, num_layers=num_layers, dropout=0.5, batch_first=True)
+        input_size = 388
+        self.rnn = _rnn_with_type(rnn_type, input_size, hidden_size, n_layers, bidirectional=False)
         self.linear = nn.Linear(hidden_size, out_features=1)
         self.n_directions = 1
         self.criterion = nn.BCEWithLogitsLoss()
 
-    def forward(self, input, hidden):
-        out, hidden_tmp = self.gru(input, hidden)
+    def forward(self, input, hidden_in):
+        out, hidden_out = self.rnn(input, hidden_in)
         out = self.linear(out)
-        return out, hidden_tmp
+        return out, hidden_out
 
     def compute_loss(self, output, labels):
         return self.criterion(output.view(-1), labels.view(-1))
@@ -188,3 +188,14 @@ def compute_accuracy88(X, Y, predicted_classes, filter_func=lambda x: x):
     n_correct = n_lh_correct + n_rh_correct
     assert n_correct <= n_notes
     return n_correct / n_notes * 100.0
+
+
+def _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional):
+    if rnn_type.upper() == 'LSTM':
+        return nn.LSTM(input_size=n_features, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
+                       dropout=0.5, bidirectional=bidirectional)
+    elif rnn_type.upper() == 'GRU':
+        return nn.GRU(input_size=n_features, hidden_size=hidden_size, num_layers=n_layers, batch_first=True,
+                      dropout=0.5, bidirectional=bidirectional)
+    else:
+        raise ValueError('Unknown RNN type: ' + rnn_type)

@@ -36,17 +36,17 @@ def main(args):
         num_features = train_data.len_features()
         num_categories = train_data.num_categories()
         model = Network88(args['hidden_size'], args['layers'], args['bidirectional'],
-                          num_features, num_categories).to(device)
+                          num_features, num_categories, args['rnn_type']).to(device)
     elif args['network'] == 'MIDI':
         train_data, valid_data, _ = \
             hd.train_valid_test_data_event(len_train_sequence=100, cv_partition=args['cv_partition'],
                                            debug=args['debug'])
-        model = NetworkMidi(args['hidden_size'], args['layers']).to(device)
+        model = NetworkMidi(args['hidden_size'], args['layers'], args['rnn_type']).to(device)
     elif args['network'] == 'Magenta':
         train_data, valid_data, _ = \
             hd.train_valid_test_data_magenta(len_train_sequence=100, cv_partition=args['cv_partition'],
                                            debug=args['debug'])
-        model = NetworkMagenta(args['hidden_size'], args['layers']).to(device)
+        model = NetworkMagenta(args['hidden_size'], args['layers'], args['rnn_type']).to(device)
 
     else:
         raise Exception('Invalid --network argument')
@@ -58,13 +58,13 @@ def main(args):
     if not os.path.exists('models'):
         os.mkdir('models')
 
-    directory = f'models/{g_time}'
+    directory = f'models/{g_time}-{trainer.descriptive_filename}'
     os.mkdir(directory)
     torch.save(model, os.path.join(directory, 'model.pt'))
     desc = {
         'args': args
     }
-    with open(directory + '/desc.json', 'w') as file:
+    with open(directory + '/args.json', 'w') as file:
         json.dump(desc, file, indent=4)
 
 
@@ -93,11 +93,14 @@ class Trainer(object):
         }
         self.model = model
         self.device = device
-        self.network_type = 'gru' if args['network'] == 'MIDI' or args['network'] == 'Magenta' else 'lstm'
+        self.rnn_type = args['rnn_type'].upper()
 
-        bi_str = '-bidirectional' if self.bidirectional else ''
-        desc = f"hidden{args['hidden_size']}_layers{args['layers']}{bi_str}"
-        self.writer = SummaryWriter(f'runs/{g_time}-p{os.getpid()}-{desc}')
+        bi_str = '_bidirectional' if self.bidirectional else ''
+        self.descriptive_filename = f"network={args['network']}({args['rnn_type']})_hidden={args['hidden_size']}" \
+            f"_layers={args['layers']}{bi_str}_cv={args['cv_partition']}"
+        logdir = f'runs/t={g_time}_pid={os.getpid()}_{self.descriptive_filename}'
+        print('Logging to ' + logdir)
+        self.writer = SummaryWriter(logdir)
 
     def zero_state_lstm(self, phase):
         n_directions = self.model.n_directions
@@ -110,10 +113,11 @@ class Trainer(object):
         return h_0, c_0
 
     def zero_state_gru(self, phase):
+        n_directions = self.model.n_directions
         if phase == 'train':
-            hidden = torch.zeros((self.layers, self.batch_size_train, self.hidden_size)).to(self.device)
+            hidden = torch.zeros((self.layers * n_directions, self.batch_size_train, self.hidden_size)).to(self.device)
         else:
-            hidden = torch.zeros((self.layers, 1, self.hidden_size)).to(self.device)
+            hidden = torch.zeros((self.layers * n_directions, 1, self.hidden_size)).to(self.device)
         return hidden
 
     def run(self):
@@ -123,10 +127,10 @@ class Trainer(object):
 
         for epoch in range(self.n_epochs):
             start_ts = dt.datetime.now()
-            avg_loss = {'train': 0.0, 'test2': 0.0}
+            avg_loss = {'train': 0.0, 'test': 0.0}
 
             for phase in ['train', 'valid']:
-                if self.network_type == 'lstm':
+                if self.rnn_type == 'LSTM':
                     h_n, c_n = self.zero_state_lstm(phase)
                 else:
                     h_gru = self.zero_state_gru(phase)
@@ -138,8 +142,8 @@ class Trainer(object):
                     with torch.set_grad_enabled(phase == 'train'):
                         X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
                         optimizer.zero_grad()
-                        if self.network_type == 'lstm':
-                            output, h_n, c_n = self.model(X_batch, h_n, c_n)
+                        if self.rnn_type == 'LSTM':
+                            output, (h_n, c_n) = self.model(X_batch, (h_n, c_n))
                         else:
                             output, h_gru = self.model(X_batch, h_gru)
                         train_loss = self.model.compute_loss(output, Y_batch)
@@ -151,14 +155,16 @@ class Trainer(object):
                             va1 = valid_accuracy[1] + 1
                             valid_accuracy = (va0, va1)
 
-                        if self.network_type == 'lstm':
+                        if self.rnn_type == 'LSTM':
                             h_n = h_n.detach()
                             c_n = c_n.detach()
                             if self.bidirectional:
-                                h_n[1::2] = 0  # ignore backward state as we are stepping forward from batch to batch
+                                h_n[1::2] = 0  # Ignore backward state as we are stepping forward from batch to batch.
                                 c_n[1::2] = 0
                         else:
                             h_gru = h_gru.detach()
+                            if self.bidirectional:
+                                h_gru[1::2] = 0 # Ignore backward state as we are stepping forward from batch to batch.
                         phase_loss = (phase_loss[0] + train_loss, phase_loss[1] + 1)
 
                 avg_loss[phase] = phase_loss[0] / phase_loss[1]
@@ -186,10 +192,10 @@ class Trainer(object):
 
     def _print_epoch_stats(self, epoch, t_total, avg_loss, valid_accuracy):
         filtered_acc = valid_accuracy[0] / valid_accuracy[1]
-        print(f'Epoch: {epoch}/{self.n_epochs - 1}, {t_total:.1f}sec')
-        print('-' * 21)
-        print(f'Train loss = {avg_loss["train"]:.6f}')
-        print(f'Valid loss = {avg_loss["valid"]:.6f}')
+        print(f'Epoch: {epoch}/{self.n_epochs - 1}, {t_total:.1f} sec')
+        print('-' * 22)
+        print(f'Train loss = {avg_loss["train"]:.7f}')
+        print(f'Valid loss = {avg_loss["valid"]:.7f}')
         print(f'Accuracy   = {filtered_acc:.1f}%', flush=True)
         print()
         print(flush=True)
@@ -217,7 +223,9 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', required=False, help='run with minimal data')
     parser.add_argument('--cv_partition', metavar='N', type=int, required=False, default=1,
                         help='the partition index (from 1 to 10) for 10-fold cross validation')
-    parser.add_argument('--network', metavar='NET', type=str, default='88',
-                        help='which network to train. Use "88", "88Tanh" or "MIDI"')
+    parser.add_argument('--network', metavar='NET', type=str,
+                        help='which network to train. Use "88", "88Tanh", Magenta or "MIDI"')
+    parser.add_argument('--rnn_type', metavar='RNN_TYPE', type=str,
+                        help='which type of RNN to use. Use "GRU" or "LSTM".')
     args = parser.parse_args()
     main(vars(args))
