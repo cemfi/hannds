@@ -210,6 +210,7 @@ class KalmanMapper(object):
 
 
 def evaluate_all(data):
+    print('Piece;Forward-Backward;Forward Only;Backward Only;Num Notes')
     total_correct = 0
     total_wrong = 0
     correct_forward = 0
@@ -228,12 +229,7 @@ def evaluate_all(data):
     acc = total_correct / (total_correct + total_wrong) * 100.0
     acc_forward = correct_forward / (correct_forward + wrong_forward) * 100.0
     acc_backward = correct_backward / (correct_backward + wrong_backward) * 100.0
-
-    print('-' * 60)
-    print('Summary')
-    print(f'Accuracy, forward-backward = {acc:.2f}% ({total_correct} / {total_correct + total_wrong})')
-    print(f'Accuracy, forward only     = {acc_forward:.2f}% ({correct_forward} / {correct_forward + wrong_forward})')
-    print(f'Accuracy, backward only    = {acc_backward:.2f}% ({correct_backward} / {correct_backward + wrong_backward})')
+    print(f'Summary;{acc:.2f}%;{acc_forward:.2f}%;{acc_backward:.2f}%;{total_correct + total_wrong}')
 
 
 def note_off_mapping(events):  # Maybe write a more efficient version
@@ -265,7 +261,7 @@ def note_off_mapping(events):  # Maybe write a more efficient version
 
 
 def evaluate_piece(data, key):
-    print(key)
+    print(key, end=';')
     forward_mapper = KalmanMapper()
     backward_mapper = KalmanMapper()
 
@@ -317,10 +313,7 @@ def evaluate_piece(data, key):
     accuracy = correct_notes / (correct_notes + wrong_notes) * 100.0
     acc_foward = correct_forward / (correct_forward + wrong_forward) * 100.0
     acc_backward = correct_backward / (correct_backward + wrong_backward) * 100.0
-    print(f'Accuracy, forward-backward = {accuracy:.1f}% ({correct_notes} / {correct_notes + wrong_notes})')
-    print(f'Accuracy, forward only     = {acc_foward:.1f}% ({correct_forward} / {correct_forward + wrong_forward})')
-    print(f'Accuracy, backward only    = {acc_backward:.1f}% ({correct_backward} / {correct_backward + wrong_backward})')
-    print()
+    print(f'{accuracy:.1f}%;{acc_foward:.1f}%;{acc_backward:.1f}%;{correct_notes + wrong_notes}')
 
     Accuracy = namedtuple('Accuracy', 'correct wrong correct_forward wrong_forward correct_backward wrong_backward')
     return Accuracy(correct_notes, wrong_notes, correct_forward, wrong_forward, correct_backward, wrong_backward)
