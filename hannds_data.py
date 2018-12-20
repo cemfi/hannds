@@ -290,6 +290,8 @@ def main():
     f.read_files_from_dir()
     data = HanndsDataset(f.train_files, 'windowed', 100, debug=False)
 
+    import matplotlib
+    matplotlib.use("TkAgg")
     import matplotlib.pyplot as plt
 
     batchX, batchY = data[0]
@@ -308,7 +310,8 @@ def main():
         plt.imshow(img, cmap='bwr', origin='lower', vmin=-1, vmax=1)
         plt.show()
 
-        if idx == 5: break
+        if idx == 5:
+            break
 
 
 if __name__ == '__main__':
