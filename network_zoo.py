@@ -80,12 +80,12 @@ class Network88Tanh(nn.Module):
 
 
 class NetworkMidi(nn.Module):
-    def __init__(self, hidden_size, n_layers, rnn_type):
+    def __init__(self, hidden_size, n_layers, rnn_type, bidirectional):
         super(NetworkMidi, self).__init__()
         n_features = 4
-        self.rnn = _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional=False)
-        self.linear = nn.Linear(hidden_size, out_features=1)
-        self.n_directions = 1
+        self.rnn = _rnn_with_type(rnn_type, n_features, hidden_size, n_layers, bidirectional=bidirectional)
+        self.n_directions = 2 if bidirectional else 1
+        self.linear = nn.Linear(hidden_size * self.n_directions, out_features=1)
         self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, input, hidden_in):
@@ -105,12 +105,13 @@ class NetworkMidi(nn.Module):
 
 
 class NetworkMagenta(nn.Module):
-    def __init__(self, hidden_size, n_layers, rnn_type):
+    def __init__(self, hidden_size, n_layers, rnn_type, bidirectional):
         super(NetworkMagenta, self).__init__()
         input_size = 388
-        self.rnn = _rnn_with_type(rnn_type, input_size, hidden_size, n_layers, bidirectional=False)
+        self.rnn = _rnn_with_type(rnn_type, input_size, hidden_size, n_layers, bidirectional=bidirectional)
         self.linear = nn.Linear(hidden_size, out_features=1)
-        self.n_directions = 1
+        self.n_directions = 2 if bidirectional else 1
+        self.linear = nn.Linear(hidden_size * self.n_directions, out_features=1)
         self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, input, hidden_in):

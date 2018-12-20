@@ -6,6 +6,8 @@ import datetime as dt
 import json
 import os
 
+import matplotlib
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tensorboardX import SummaryWriter
@@ -28,7 +30,8 @@ def main(args):
             hd.train_valid_test_data_windowed_tanh(len_train_sequence=100, cv_partition=args['cv_partition'],
                                                    debug=args['debug'])
         num_features = train_data.len_features()
-        model = Network88Tanh(args['hidden_size'], args['layers'], args['bidirectional'], num_features).to(device)
+        model = Network88Tanh(args['hidden_size'], args['layers'], args['bidirectional'], num_features,
+                              args['rnn_type']).to(device)
     elif args['network'] == '88':
         train_data, valid_data, _ = \
             hd.train_valid_test_data_windowed(len_train_sequence=100, cv_partition=args['cv_partition'],
@@ -41,12 +44,12 @@ def main(args):
         train_data, valid_data, _ = \
             hd.train_valid_test_data_event(len_train_sequence=100, cv_partition=args['cv_partition'],
                                            debug=args['debug'])
-        model = NetworkMidi(args['hidden_size'], args['layers'], args['rnn_type']).to(device)
+        model = NetworkMidi(args['hidden_size'], args['layers'], args['rnn_type'], args['bidirectional']).to(device)
     elif args['network'] == 'Magenta':
         train_data, valid_data, _ = \
             hd.train_valid_test_data_magenta(len_train_sequence=100, cv_partition=args['cv_partition'],
-                                           debug=args['debug'])
-        model = NetworkMagenta(args['hidden_size'], args['layers'], args['rnn_type']).to(device)
+                                             debug=args['debug'])
+        model = NetworkMagenta(args['hidden_size'], args['layers'], args['rnn_type'], args['bidirectional']).to(device)
 
     else:
         raise Exception('Invalid --network argument')
