@@ -40,7 +40,7 @@ def test_causal_action():
     zero[4, 2] = 1
     zero = causal_filter(zero)
 
-    correct = torch.zeros((5, 3))
+    correct = np.zeros((5, 3))
     correct[1, 0] = 1
     correct[2, 0] = 1
     correct[3, 0] = 1
