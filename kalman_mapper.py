@@ -8,7 +8,6 @@ import mido
 from mido.midifiles.tracks import _to_abstime
 import scipy.stats
 
-import hannds_data
 import hannds_files
 
 g_package_directory = os.path.dirname(os.path.abspath(__file__))
