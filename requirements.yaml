@@ -1,4 +1,4 @@
-name: pytorch
+name: hannds
 
 channels:
   - pytorch
@@ -7,8 +7,8 @@ dependencies:
   - python=3.6
   - matplotlib
   - pytorch
-  - cudatoolkit
   - pytest
+  - scipy
   - pip
   - pip:
     - mido
