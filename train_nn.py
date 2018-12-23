@@ -7,6 +7,7 @@ import json
 import os
 
 import matplotlib
+
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -167,7 +168,7 @@ class Trainer(object):
                         else:
                             h_gru = h_gru.detach()
                             if self.bidirectional:
-                                h_gru[1::2] = 0 # Ignore backward state as we are stepping forward from batch to batch.
+                                h_gru[1::2] = 0  # Ignore backward state as we are stepping forward from batch to batch.
                         phase_loss = (phase_loss[0] + train_loss, phase_loss[1] + 1)
 
                 avg_loss[phase] = phase_loss[0] / phase_loss[1]

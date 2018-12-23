@@ -174,11 +174,11 @@ def convert_magenta(midi):
         notes = instrument.notes
         for note in notes:
             velocity_0_to_32 = note.velocity // 4
-            events[i, note.pitch] = 1 # Note on
-            events[i, -1] = note.start # Timestamp note on
-            events[i + 1, note.pitch + 128] = 1 # Note off
-            events[i+ 1, -1] = note.end # Timestamp note off
-            events[i:i + 2, 356 + velocity_0_to_32] = 1 # Set velocity
+            events[i, note.pitch] = 1  # Note on
+            events[i, -1] = note.start  # Timestamp note on
+            events[i + 1, note.pitch + 128] = 1  # Note off
+            events[i + 1, -1] = note.end  # Timestamp note off
+            events[i:i + 2, 356 + velocity_0_to_32] = 1  # Set velocity
             events[i:i + 2, -2] = hand
 
             i += 2
@@ -189,13 +189,12 @@ def convert_magenta(midi):
     delta_time = (delta_time - 0.01) / (10.0 - 0.01) * 99.5
     delta_time = delta_time.astype(np.int)
 
-    events[0, 355] = 1 # Assume ten seconds silence before first note is played
+    events[0, 355] = 1  # Assume ten seconds silence before first note is played
     for i in range(1, len(events)):
         events[i, 256 + delta_time[i - 1]] = 1
 
     Y = events[:, -2].astype(np.float32)
     return events[:, :-2].astype(np.float32), Y
-
 
 
 class HanndsDataset(Dataset):
