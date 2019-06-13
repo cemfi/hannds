@@ -13,50 +13,65 @@ import hannds_files
 
 
 def train_valid_test_data_windowed(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test2 data in the categorical windowed format"""
+    """Training, validation and test data in the categorical windowed format"""
 
-    make_npz_files(overwrite=False, subdir='windowed', convert_func=convert_windowed)
-    all_files = hannds_files.TrainValidTestFiles()
-    all_files.read_files_from_dir(cv_partition)
-    train_data = HanndsDataset(all_files.train_files, 'windowed', len_sequence=len_train_sequence, debug=debug)
-    valid_data = HanndsDataset(all_files.valid_files, 'windowed', len_sequence=-1, debug=debug)
-    test_data = HanndsDataset(all_files.test_files, 'windowed', len_sequence=-1, debug=debug)
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    hannds_dir = os.path.join(module_directory, 'data-hannds')
+
+    make_npz_files(overwrite=False, midi_dir=hannds_dir, subdir='windowed', convert_func=convert_windowed)
+    all_files = hannds_files.TrainValidTestFiles(hannds_dir)
+    all_files.get_partition(cv_partition)
+    train_data = HanndsDataset(hannds_dir, all_files.train_files, 'windowed', len_sequence=len_train_sequence,
+                               debug=debug)
+    valid_data = HanndsDataset(hannds_dir, all_files.valid_files, 'windowed', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(hannds_dir, all_files.test_files, 'windowed', len_sequence=-1, debug=debug)
     return train_data, valid_data, test_data
 
 
 def train_valid_test_data_windowed_tanh(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test2 data in the windowed +/-1 format"""
+    """Training, validation and test data in the windowed +/-1 format"""
 
-    make_npz_files(overwrite=False, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
-    all_files = hannds_files.TrainValidTestFiles()
-    all_files.read_files_from_dir(cv_partition)
-    train_data = HanndsDataset(all_files.train_files, 'windowed_tanh', len_sequence=len_train_sequence, debug=debug)
-    valid_data = HanndsDataset(all_files.valid_files, 'windowed_tanh', len_sequence=-1, debug=debug)
-    test_data = HanndsDataset(all_files.test_files, 'windowed_tanh', len_sequence=-1, debug=debug)
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    hannds_dir = os.path.join(module_directory, 'data-hannds')
+
+    make_npz_files(overwrite=False, midi_dir=hannds_dir, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
+    all_files = hannds_files.TrainValidTestFiles(hannds_dir)
+    all_files.get_partition(cv_partition)
+    train_data = HanndsDataset(hannds_dir, all_files.train_files, 'windowed_tanh', len_sequence=len_train_sequence,
+                               debug=debug)
+    valid_data = HanndsDataset(hannds_dir, all_files.valid_files, 'windowed_tanh', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(hannds_dir, all_files.test_files, 'windowed_tanh', len_sequence=-1, debug=debug)
     return train_data, valid_data, test_data
 
 
 def train_valid_test_data_event(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test2 data in the MIDI event format"""
+    """Training, validation and test data in the MIDI event format"""
 
-    make_npz_files(overwrite=False, subdir='event', convert_func=convert_event)
-    all_files = hannds_files.TrainValidTestFiles()
-    all_files.read_files_from_dir(cv_partition)
-    train_data = HanndsDataset(all_files.train_files, 'event', len_sequence=len_train_sequence, debug=debug)
-    valid_data = HanndsDataset(all_files.valid_files, 'event', len_sequence=-1, debug=debug)
-    test_data = HanndsDataset(all_files.test_files, 'event', len_sequence=-1, debug=debug)
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    hannds_dir = os.path.join(module_directory, 'data-hannds')
+
+    make_npz_files(overwrite=False, midi_dir=hannds_dir, subdir='event', convert_func=convert_event)
+    all_files = hannds_files.TrainValidTestFiles(hannds_dir)
+    all_files.get_partition(cv_partition)
+    train_data = HanndsDataset(hannds_dir, all_files.train_files, 'event', len_sequence=len_train_sequence, debug=debug)
+    valid_data = HanndsDataset(hannds_dir, all_files.valid_files, 'event', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(hannds_dir, all_files.test_files, 'event', len_sequence=-1, debug=debug)
     return train_data, valid_data, test_data
 
 
 def train_valid_test_data_magenta(len_train_sequence, cv_partition=1, debug=False):
-    """Training, validation and test2 data in the magenta project's MIDI event format for Performance RNN"""
+    """Training, validation and test data in the magenta project's MIDI event format for Performance RNN"""
 
-    make_npz_files(overwrite=False, subdir='magenta', convert_func=convert_magenta)
-    all_files = hannds_files.TrainValidTestFiles()
-    all_files.read_files_from_dir(cv_partition)
-    train_data = HanndsDataset(all_files.train_files, 'magenta', len_sequence=len_train_sequence, debug=debug)
-    valid_data = HanndsDataset(all_files.valid_files, 'magenta', len_sequence=-1, debug=debug)
-    test_data = HanndsDataset(all_files.test_files, 'magenta', len_sequence=-1, debug=debug)
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    hannds_dir = os.path.join(module_directory, 'data-hannds')
+
+    make_npz_files(overwrite=False, midi_dir=hannds_dir, subdir='magenta', convert_func=convert_magenta)
+    all_files = hannds_files.TrainValidTestFiles(hannds_dir)
+    all_files.get_partition(cv_partition)
+    train_data = HanndsDataset(hannds_dir, all_files.train_files, 'magenta', len_sequence=len_train_sequence,
+                               debug=debug)
+    valid_data = HanndsDataset(hannds_dir, all_files.valid_files, 'magenta', len_sequence=-1, debug=debug)
+    test_data = HanndsDataset(hannds_dir, all_files.test_files, 'magenta', len_sequence=-1, debug=debug)
     return train_data, valid_data, test_data
 
 
@@ -69,9 +84,9 @@ WINDOWED_TANH_RIGHT_HAND = +1
 WINDOWED_TANH_NOT_PLAYED = 0
 
 
-def make_npz_files(overwrite, subdir, convert_func):
-    midi_files = hannds_files.all_midi_files(absolute_path=True)
-    npy_paths = hannds_files.npz_files_for_midi(midi_files, subdir)
+def make_npz_files(overwrite, midi_dir, subdir, convert_func):
+    midi_files = hannds_files.all_midi_files(midi_dir, absolute_path=True)
+    npy_paths = hannds_files.npz_files_for_midi(midi_dir, midi_files, subdir)
 
     for midi_file, npy_path in zip(midi_files, npy_paths):
         if overwrite or not os.path.exists(npy_path):
@@ -211,9 +226,9 @@ class HanndsDataset(Dataset):
 
     XY = namedtuple('XY', ['X', 'Y'])
 
-    def __init__(self, midi_files, subdir, len_sequence, debug):
+    def __init__(self, midi_dir, midi_files, subdir, len_sequence, debug):
         self.len_sequence = len_sequence
-        npz_files = hannds_files.npz_files_for_midi(midi_files, subdir)
+        npz_files = hannds_files.npz_files_for_midi(midi_dir, midi_files, subdir)
         if debug:
             load_all = [np.load(npz_file) for npz_file in npz_files[:2]]
         else:
@@ -273,21 +288,24 @@ class ContinuationSampler(Sampler):
 
 
 def main():
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    hannds_dir = os.path.join(module_directory, 'data-hannds')
+
     print('Making magenta')
-    make_npz_files(overwrite=True, subdir='magenta', convert_func=convert_magenta)
+    make_npz_files(overwrite=True, midi_dir=hannds_dir, subdir='magenta', convert_func=convert_magenta)
     print('Making windowed')
-    make_npz_files(overwrite=True, subdir='windowed', convert_func=convert_windowed)
+    make_npz_files(overwrite=True, midi_dir=hannds_dir, subdir='windowed', convert_func=convert_windowed)
     print()
     print('Making windowed_tanh')
-    make_npz_files(overwrite=True, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
+    make_npz_files(overwrite=True, midi_dir=hannds_dir, subdir='windowed_tanh', convert_func=convert_windowed_tanh)
     print()
     print('Making event')
-    make_npz_files(overwrite=True, subdir='event', convert_func=convert_event)
+    make_npz_files(overwrite=True, midi_dir=hannds_dir, subdir='event', convert_func=convert_event)
     print()
 
-    f = hannds_files.TrainValidTestFiles()
-    f.read_files_from_dir()
-    data = HanndsDataset(f.train_files, 'windowed', 100, debug=False)
+    f = hannds_files.TrainValidTestFiles(hannds_dir)
+    f.get_partition(1)
+    data = HanndsDataset(hannds_dir, f.train_files, 'windowed', 100, debug=False)
 
     import matplotlib
     matplotlib.use("TkAgg")

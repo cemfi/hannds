@@ -10,14 +10,13 @@ import scipy.stats
 
 import hannds_files
 
-g_package_directory = os.path.dirname(os.path.abspath(__file__))
-
 
 # Data
 
-def kalman_mapper_data(path, debug=False):
+def kalman_mapper_data(debug=False):
     data_dict = {}
-    midi_files = hannds_files.all_midi_files(absolute_path=True)
+    module_directory = os.path.dirname(os.path.abspath(__file__))
+    midi_files = hannds_files.all_midi_files(os.path.join(module_directory, 'data-hannds'), absolute_path=True)
 
     for idx, midi_file in enumerate(midi_files):
         midi = mido.MidiFile(midi_file)
@@ -319,7 +318,7 @@ def evaluate_piece(data, key):
 
 
 def main(debug=False):
-    data = kalman_mapper_data(os.path.join(g_package_directory, 'data'), debug=debug)
+    data = kalman_mapper_data(debug=debug)
     evaluate_all(data)
 
 

@@ -64,11 +64,12 @@ def models_in_dir(path):
 
 
 def main(args):
-    idx = 0
+    print(args['models_path'])
+    print('Network;Accuracy')
     dirs = models_in_dir(args['models_path'])
     all_results = []
     for main_folder in dirs:
-        print(main_folder)
+        # print(main_folder)
         model_path = os.path.join(main_folder, 'model.pt')
         args_path = os.path.join(main_folder, 'args.json')
         with open(args_path, 'r') as f:
@@ -76,12 +77,12 @@ def main(args):
 
         model = torch.load(model_path, map_location='cpu')
         result = evaluate(model, training_args)
-        print(result)
+        # print(result)
         all_results.append({
             'train': training_args,
             'result': result
         })
-        print('')
+        # print('')
 
     result_dict = {}
     for r in all_results:

@@ -6,22 +6,23 @@ import glob
 import random
 
 
-def all_midi_files(absolute_path=False):
-    return _get_files_from_path(os.path.join(_g_package_directory, 'data'), ['*.mid', '*.midi'], absolute_path)
+def all_midi_files(directory, absolute_path=False):
+    return _get_files_from_path(directory, ['*.mid', '*.midi'], absolute_path)
 
 
-def npz_files_for_midi(midi_files, subdir):
-    base_dir = _get_preprocessed_path(subdir)
+def npz_files_for_midi(directory, midi_files, subdir):
+    base_dir = _get_preprocessed_path(directory, subdir)
     npz_files = [os.path.join(base_dir, os.path.splitext(os.path.basename(m))[0] + '.npz') for m in midi_files]
     return npz_files
 
 
 class TrainValidTestFiles(object):
-    def __init__(self):
+    def __init__(self, midi_dir):
         self.train_files = self.valid_files = self.test_files = None
+        self.midi_dir = midi_dir
 
-    def read_files_from_dir(self, cv_partition=1):
-        all_files = all_midi_files()
+    def get_partition(self, cv_partition):
+        all_files = all_midi_files(self.midi_dir)
         r = random.Random(42)  # seed is arbitrary
         r.shuffle(all_files)
 
@@ -62,9 +63,6 @@ class TrainValidTestFiles(object):
         end = begin + self._n_hold_out(cv_partition, n_files)
         return begin, end
 
-    def midi_dir(self):
-        return os.path.join(_g_package_directory, 'data/')
-
 
 def _get_files_from_path(path, extensions, absolute_path=False):
     if os.path.isfile(path):  # Load single file
@@ -82,8 +80,8 @@ def _get_files_from_path(path, extensions, absolute_path=False):
     return sorted(files)
 
 
-def _get_preprocessed_path(subdir):
-    output_path = os.path.join(_g_package_directory, 'preprocessed')
+def _get_preprocessed_path(directory, subdir):
+    output_path = os.path.join(directory, '_preprocessed')
     if not os.path.exists(output_path):
         os.mkdir(output_path)
     output_path = os.path.join(output_path, subdir)
@@ -92,13 +90,10 @@ def _get_preprocessed_path(subdir):
     return output_path
 
 
-_g_package_directory = os.path.dirname(os.path.abspath(__file__))
-
-
 def main():
     from pprint import pprint
-    all = TrainValidTestFiles()
-    all.read_files_from_dir()
+    all = TrainValidTestFiles('hannds-data')
+    all.get_partition(1)
     print('Training')
     pprint(all.train_files)
     print()
