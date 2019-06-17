@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source activate pytorch
+source activate neumus
 python --version
 
 python evaluate_nn.py --models_path models/1 > eval1.csv

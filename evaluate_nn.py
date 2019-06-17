@@ -9,7 +9,7 @@ import hannds_data
 
 
 def evaluate(model, training_args):
-    device = torch.device('cuda' if torch.cuda.is_available() and training_args['cuda'] else 'cpu')
+    device = 'cpu'
     model.to(device)
 
     x, y = _get_test(training_args, cv_partition=training_args['cv_partition'])
@@ -106,6 +106,5 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Learn hannds neural net')
     parser.add_argument('--models_path', metavar='PATH', type=str, required=True, help='path to the model')
-    parser.add_argument('--cuda', action='store_true', required=False, help='use CUDA')
     args = parser.parse_args()
     main(vars(args))
